@@ -1,5 +1,5 @@
 /**
- * SPHEREx Time Explorer — app.js
+ * Project X-102 — app.js
  * NASA-IPAC Observational Gateway
  * Real IRSA SIA2 data: spherex_dr1 + spherex_qr3 ONLY (never spherex_qr2)
  */
@@ -7,11 +7,31 @@
 "use strict";
 
 // ─── API Base ────────────────────────────────────────────────────────────────
-// When running over HTTP/HTTPS, relative paths ("") are used for bulletproof same-origin requests.
-// Falls back to http://127.0.0.1:8000 only when loaded directly from the local filesystem (file://).
-const API_BASE = (typeof window !== "undefined" && window.location.protocol.startsWith("http"))
-  ? ""
-  : "http://127.0.0.1:8000";
+// Dynamically resolves backend endpoint across local dev ports, Live Server, and production.
+const API_BASE = (() => {
+  if (typeof window === "undefined" || !window.location) return "http://127.0.0.1:8000";
+  if (window.__API_BASE__) return window.__API_BASE__;
+  try {
+    const stored = localStorage.getItem("astro_api_base");
+    if (stored) return stored;
+  } catch (_) {}
+
+  const { protocol, hostname, port } = window.location;
+  // Direct file opening or non-http
+  if (protocol === "file:" || !protocol.startsWith("http")) return "http://127.0.0.1:8000";
+
+  // Running locally
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    // If running on a static dev port (Live Server 5500, Vite 5173, etc.), target FastAPI on 8000
+    if (port && port !== "8000") {
+      return `http://${hostname}:8000`;
+    }
+    return "";
+  }
+
+  // Running on Render or remote production host (same origin)
+  return "";
+})();
 
 // ─── Application State ───────────────────────────────────────────────────────
 const state = {
@@ -284,15 +304,25 @@ async function probeHealth() {
   if (!dot || !txt) return;
 
   try {
-    const resp = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(`${API_BASE}/health`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     dot.className = "dot online";
-    txt.textContent = "Online: SPHEREx DR1 & QR3";
+    txt.textContent = "Online: Project X-102 (DR1 & QR3)";
   } catch (err) {
     console.warn("Health probe notice:", err);
     dot.className = "dot offline";
-    txt.textContent = "API Offline";
+    if (err.name === "AbortError") {
+      txt.textContent = "API Connecting (Waking up...)";
+    } else {
+      txt.textContent = "API Offline (Check port 8000)";
+    }
   }
 }
 
