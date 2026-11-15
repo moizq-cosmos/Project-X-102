@@ -7,7 +7,10 @@
 "use strict";
 
 // ─── API Base ────────────────────────────────────────────────────────────────
-const API_BASE = "http://127.0.0.1:8000";
+// Automatically uses current origin on Render/production, or http://127.0.0.1:8000 when running locally
+const API_BASE = (typeof window !== "undefined" && window.location.origin && window.location.origin !== "null" && !window.location.origin.startsWith("file:"))
+  ? window.location.origin
+  : "http://127.0.0.1:8000";
 
 // ─── Application State ───────────────────────────────────────────────────────
 const state = {
