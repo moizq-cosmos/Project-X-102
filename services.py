@@ -528,6 +528,7 @@ def fetch_all_observations(
         "max_frames": max_frames,
         "band_filter": band or "ALL",
         "mjd_baseline_days": mjd_baseline_days,
+        "baseline_days": mjd_baseline_days,
         "collections_queried": list(ALLOWED_COLLECTIONS),
         "collection_counts": collection_counts,
         "status": status,
