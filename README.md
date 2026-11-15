@@ -153,29 +153,41 @@ This repository is pre-configured for instant deployment on [Render](https://ren
 
 ---
 
-## 📁 Repository Structure
+## 📁 Repository & Branch Structure
 
-```
-.
-├── main.py                     # FastAPI application endpoints & routing
-├── services.py                 # IRSA SIA2/IBE client, WCS differencing, & ZIP exporter
-├── verify_all_targets.py       # Automated 5-target verification test suite
-├── requirements.txt            # Pinned production dependencies
-├── render.yaml                 # Render infrastructure-as-code blueprint
-├── .gitignore                  # Git exclusion rules
-├── README.md                   # Project documentation & scientific citation guide
-├── run.ps1                     # PowerShell launch helper
-├── run.sh                      # Shell launch helper
-├── static/
-│   ├── index.html              # Responsive single-page application interface
-│   ├── styles.css              # Dark-space theme with responsive layouts
-│   └── app.js                  # Frontend state machine, blink player, & differencing
-└── docs/
-    ├── SPHEREx_Time_Explorer_Final_Verification_Report.docx  # NASA review report
-    ├── 01_timeline_cutout_viewer.png                         # Timeline UI screenshot
-    ├── 02_before_after_comparison.png                        # Before/After comparison
-    └── 03_diff_view_residuals.png                            # Float32 difference view
-```
+To maintain a lean and lightning-fast deployment footprint on cloud platforms like Render, the repository is organized across two branches:
+
+- **`main` (Production Web Application):**
+  Contains only the essential files required to build, test, and serve the SPHEREx Time Explorer web application and API:
+  ```
+  .
+  ├── main.py                     # FastAPI application endpoints & routing
+  ├── services.py                 # IRSA SIA2/IBE client, WCS differencing, & ZIP exporter
+  ├── requirements.txt            # Pinned production dependencies
+  ├── render.yaml                 # Render infrastructure-as-code blueprint
+  ├── .gitignore                  # Git exclusion rules
+  ├── README.md                   # Project documentation & deployment guide
+  ├── run.ps1                     # PowerShell launch helper
+  ├── run.sh                      # Shell launch helper
+  └── static/
+      ├── index.html              # Responsive single-page application interface
+      ├── styles.css              # Dark-space theme with responsive layouts
+      └── app.js                  # Frontend state machine, blink player, & differencing
+  ```
+
+- **`artifacts` (Verification Suite, Reports & Datasets):**
+  Houses the complete automated verification suite, NASA Space Apps verification report, high-resolution UI screenshots, and offline reference VOTables/FITS cutouts:
+  ```
+  .
+  ├── verify_all_targets.py       # Automated 5-target verification test suite
+  ├── docs/
+  │   ├── SPHEREx_Time_Explorer_Final_Verification_Report.docx  # NASA review report
+  │   ├── 01_timeline_cutout_viewer.png                         # Timeline UI screenshot
+  │   ├── 02_before_after_comparison.png                        # Before/After comparison
+  │   └── 03_diff_view_residuals.png                            # Float32 difference view
+  ├── screenshots/                # Verification UI captures
+  └── *_dr1_irsa.xml, *.fits      # Reference SIA2 VOTables and sample FITS cutouts
+  ```
 
 ---
 
