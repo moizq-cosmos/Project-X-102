@@ -7,9 +7,10 @@
 "use strict";
 
 // ─── API Base ────────────────────────────────────────────────────────────────
-// Automatically uses current origin on Render/production, or http://127.0.0.1:8000 when running locally
-const API_BASE = (typeof window !== "undefined" && window.location.origin && window.location.origin !== "null" && !window.location.origin.startsWith("file:"))
-  ? window.location.origin
+// When running over HTTP/HTTPS, relative paths ("") are used for bulletproof same-origin requests.
+// Falls back to http://127.0.0.1:8000 only when loaded directly from the local filesystem (file://).
+const API_BASE = (typeof window !== "undefined" && window.location.protocol.startsWith("http"))
+  ? ""
   : "http://127.0.0.1:8000";
 
 // ─── Application State ───────────────────────────────────────────────────────
@@ -144,12 +145,16 @@ async function apiFetch(url, options = {}) {
 async function probeHealth() {
   const dot = document.getElementById("dot");
   const txt = document.getElementById("status-txt");
+  if (!dot || !txt) return;
+
   try {
-    const resp = await apiFetch(`${API_BASE}/health`);
+    const resp = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     dot.className = "dot online";
     txt.textContent = "Online: SPHEREx DR1 & QR3";
-  } catch (_) {
+  } catch (err) {
+    console.warn("Health probe notice:", err);
     dot.className = "dot offline";
     txt.textContent = "API Offline";
   }
@@ -1197,12 +1202,27 @@ function syncCoordsFromInputs() {
 
 // ─── Initialise ───────────────────────────────────────────────────────────────
 
-document.addEventListener("DOMContentLoaded", async () => {
-  parseUrlParams();
-  setupEventListeners();
+async function init() {
+  try {
+    parseUrlParams();
+    setupEventListeners();
+  } catch (err) {
+    console.error("Initialization error:", err);
+  }
+
   await probeHealth();
   setInterval(probeHealth, 15000);
 
-  // Auto-load target on startup (from URL or default)
-  await loadObservations();
-});
+  try {
+    await loadObservations();
+  } catch (err) {
+    console.error("Initial load error:", err);
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  // DOM already parsed, initialize immediately
+  init();
+}
