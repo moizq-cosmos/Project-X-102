@@ -80,16 +80,15 @@ function getTargetProperMotion() {
 }
 
 function updateTrackingTelemetry(obs) {
-  if (!obs) return;
-
   const pm = getTargetProperMotion();
-  const mjd = obs.mjd != null ? Number(obs.mjd) : 60800.0;
+  const firstObs = state.observations && state.observations.length > 0 ? state.observations[0] : obs;
+  const currentObs = obs || (state.observations && state.observations.length > 0 ? state.observations[state.currentEpochIdx || 0] : null);
+  const mjd = currentObs?.mjd != null ? Number(currentObs.mjd) : 60800.0;
   // Elapsed time since J2000.0 (MJD 51544.5) in years
   const dt_yr = (mjd - 51544.5) / 365.25;
 
   // Relative shift compared to Epoch 0 in years
-  const firstObs = state.observations && state.observations.length > 0 ? state.observations[0] : obs;
-  const mjd0 = firstObs.mjd != null ? Number(firstObs.mjd) : mjd;
+  const mjd0 = firstObs?.mjd != null ? Number(firstObs.mjd) : mjd;
   const dt_rel_yr = (mjd - mjd0) / 365.25;
 
   const ra0 = pm ? pm.ra0 : state.ra;
@@ -1254,6 +1253,7 @@ function setupEventListeners() {
       const targetIn = document.getElementById("target-in");
       if (targetIn) targetIn.value = name;
 
+      updateTrackingTelemetry();
       syncUrlParams();
       await loadObservations();
     });
@@ -1400,6 +1400,7 @@ async function init() {
   try {
     parseUrlParams();
     setupEventListeners();
+    updateTrackingTelemetry();
   } catch (err) {
     console.error("Initialization error:", err);
   }
