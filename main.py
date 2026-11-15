@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -68,13 +68,36 @@ ALLOWED_COLLECTIONS = ("spherex_dr1", "spherex_qr3")
 # ─── Known Challenge Targets (for /telemetry stub) ────────────────────────────
 
 KNOWN_TARGETS: dict[str, dict] = {
-    "wise 0855": {"ra": 133.7951, "dec": -7.2451, "object_type": "Y-dwarf", "constellation": "Hydra"},
-    "wise0855": {"ra": 133.7951, "dec": -7.2451, "object_type": "Y-dwarf", "constellation": "Hydra"},
-    "barnard's star": {"ra": 269.4521, "dec": 4.6934, "object_type": "Red dwarf", "constellation": "Ophiuchus"},
-    "barnards star": {"ra": 269.4521, "dec": 4.6934, "object_type": "Red dwarf", "constellation": "Ophiuchus"},
-    "epsilon indi b": {"ra": 331.0771, "dec": -56.7825, "object_type": "T-dwarf", "constellation": "Indus"},
-    "rw aurigae": {"ra": 76.9565, "dec": 30.4014, "object_type": "T Tauri star", "constellation": "Auriga"},
-    "r draconis": {"ra": 248.1633, "dec": 66.7556, "object_type": "Mira variable", "constellation": "Draco"},
+    "wise 0855": {
+        "ra": 133.7951, "dec": -7.2451, "object_type": "Y-dwarf", "constellation": "Hydra",
+        "primary_signature": 'High Proper Motion (8.15"/yr)', "motion_type": "astrometric"
+    },
+    "wise0855": {
+        "ra": 133.7951, "dec": -7.2451, "object_type": "Y-dwarf", "constellation": "Hydra",
+        "primary_signature": 'High Proper Motion (8.15"/yr)', "motion_type": "astrometric"
+    },
+    "barnard's star": {
+        "ra": 269.4521, "dec": 4.6934, "object_type": "Red dwarf", "constellation": "Ophiuchus",
+        "primary_signature": 'High Proper Motion (10.36"/yr)', "motion_type": "astrometric"
+    },
+    "barnards star": {
+        "ra": 269.4521, "dec": 4.6934, "object_type": "Red dwarf", "constellation": "Ophiuchus",
+        "primary_signature": 'High Proper Motion (10.36"/yr)', "motion_type": "astrometric"
+    },
+    "epsilon indi b": {
+        "ra": 331.0771, "dec": -56.7825, "object_type": "T-dwarf", "constellation": "Indus",
+        "primary_signature": 'High Proper Motion (4.70"/yr)', "motion_type": "astrometric"
+    },
+    "rw aurigae": {
+        "ra": 76.9565, "dec": 30.4014, "object_type": "T Tauri star", "constellation": "Auriga",
+        "primary_signature": 'Accretion Dipper / Brightness Variable (0.022"/yr proper motion — sub-pixel static position; inspect flux/Diff View for dimming events)',
+        "motion_type": "photometric"
+    },
+    "r draconis": {
+        "ra": 248.1633, "dec": 66.7556, "object_type": "Mira variable", "constellation": "Draco",
+        "primary_signature": 'Mira Long-Period Variable (~245d period, 0.014"/yr proper motion — sub-pixel static position; inspect brightness change)',
+        "motion_type": "photometric"
+    },
 }
 
 # ─── Static & Web Application Routes ──────────────────────────────────────────
@@ -199,9 +222,11 @@ def get_telemetry(target: str = Query(..., min_length=1)):
         "coordinates": {"ra": info["ra"], "dec": info["dec"]},
         "object_type": info.get("object_type"),
         "constellation": info.get("constellation"),
+        "primary_signature": info.get("primary_signature"),
+        "motion_type": info.get("motion_type"),
         "observations_url": (
-            f"http://127.0.0.1:8000/observations"
-            f"?ra={info['ra']}&dec={info['dec']}&radius_deg=0.1&max_frames=50"
+            f"/observations"
+            f"?ra={info['ra']}&dec={info['dec']}&radius_deg=0.05&max_frames=50"
         ),
     }
 
@@ -242,6 +267,7 @@ IRSA_HOST = "irsa.ipac.caltech.edu"
 
 @app.get("/cutout", tags=["SPHEREx Observations"])
 def get_cutout(
+    response: Response,
     access_url: str = Query(..., description="IRSA IBE FITS access URL from /observations"),
     obs_id: str = Query("", description="Observation ID for cache keying"),
     ra: float = Query(..., ge=0.0, le=360.0),
@@ -286,6 +312,8 @@ def get_cutout(
     except UpstreamArchiveError as exc:
         logger.warning("FITS cutout error for %s: %s", obs_id, exc)
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    response.headers["Cache-Control"] = "public, max-age=86400"
 
     return {
         "obs_id": obs_id,

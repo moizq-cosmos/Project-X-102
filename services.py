@@ -7,6 +7,7 @@ No synthetic/mock fallbacks. Scientific integrity enforced throughout.
 from __future__ import annotations
 
 import base64
+from collections import OrderedDict
 import concurrent.futures
 import csv
 import datetime
@@ -41,6 +42,68 @@ CHALLENGE_TARGET_DATA: List[Tuple[str, float, float]] = [
     ("rw_aurigae", 76.9565, 30.4014),
     ("r_draconis", 248.1633, 66.7556),
 ]
+
+CHALLENGE_TARGET_SIGNATURES: Dict[str, Dict[str, Any]] = {
+    "barnard's star": {
+        "primary_signature": 'High Proper Motion (10.36"/yr)',
+        "motion_type": "astrometric",
+        "description": "Rapidly moving red dwarf in Ophiuchus (10359 mas/yr proper motion).",
+    },
+    "barnards star": {
+        "primary_signature": 'High Proper Motion (10.36"/yr)',
+        "motion_type": "astrometric",
+        "description": "Rapidly moving red dwarf in Ophiuchus (10359 mas/yr proper motion).",
+    },
+    "wise 0855": {
+        "primary_signature": 'High Proper Motion (8.15"/yr)',
+        "motion_type": "astrometric",
+        "description": "Cold sub-stellar Y-dwarf with large proper motion (8152 mas/yr).",
+    },
+    "wise0855": {
+        "primary_signature": 'High Proper Motion (8.15"/yr)',
+        "motion_type": "astrometric",
+        "description": "Cold sub-stellar Y-dwarf with large proper motion (8152 mas/yr).",
+    },
+    "epsilon indi b": {
+        "primary_signature": 'High Proper Motion (4.70"/yr)',
+        "motion_type": "astrometric",
+        "description": "Nearby cold T-dwarf binary companion (4704 mas/yr proper motion).",
+    },
+    "rw aurigae": {
+        "primary_signature": 'Accretion Dipper / Brightness Variable (0.022"/yr proper motion — sub-pixel static position; inspect flux/Diff View for dimming events)',
+        "motion_type": "photometric",
+        "description": "Young stellar object / T Tauri variable with circumstellar disk occultation.",
+    },
+    "r draconis": {
+        "primary_signature": 'Mira Long-Period Variable (~245d period, 0.014"/yr proper motion — sub-pixel static position; inspect brightness change)',
+        "motion_type": "photometric",
+        "description": "Pulsating red giant with ~245-day cycle and large infrared amplitude.",
+    },
+}
+
+class LRUPNGCache:
+    """Thread-safe in-memory LRU cache for up to maxsize rendered PNG cutouts."""
+    def __init__(self, maxsize: int = 120):
+        self.maxsize = maxsize
+        self._cache: OrderedDict[Tuple[str, float, float, float, str], Tuple[str, Dict[str, Any]]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: Tuple[str, float, float, float, str]) -> Optional[Tuple[str, Dict[str, Any]]]:
+        with self._lock:
+            if key not in self._cache:
+                return None
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
+    def set(self, key: Tuple[str, float, float, float, str], value: Tuple[str, Dict[str, Any]]) -> None:
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = value
+            if len(self._cache) > self.maxsize:
+                self._cache.popitem(last=False)
+
+cutout_png_lru_cache = LRUPNGCache(maxsize=120)
 
 
 def _find_local_target_files(ra: float, dec: float) -> Tuple[Optional[Path], Optional[Path]]:
@@ -433,11 +496,10 @@ def fetch_all_observations(
     total_found = len(deduped)
     observations = sample_stratified_epochs(deduped, max_frames=max_frames)
 
-    # Compute baseline span in days
+    # Compute baseline span in days directly from exact returned observations array
     if len(observations) >= 2:
-        mjd_first = observations[0].get("mjd") or 0.0
-        mjd_last = observations[-1].get("mjd") or 0.0
-        mjd_baseline_days = round(mjd_last - mjd_first, 2)
+        mjds = [float(r["mjd"]) for r in observations if r.get("mjd") is not None]
+        mjd_baseline_days = round(float(max(mjds) - min(mjds)), 2) if len(mjds) >= 2 else 0.0
     else:
         mjd_baseline_days = 0.0
 
@@ -832,16 +894,30 @@ def fetch_observation_cutout(
     """
     Fetches FITS cutout from IRSA IBE and processes to Base64 PNG.
     Returns (base64_string, stats_dict).
+    Uses 120-item thread-safe LRU cache and persistent spherex_cache.
     Raises UpstreamTimeoutError or UpstreamArchiveError on failure.
     """
+    lru_key = (
+        access_url,
+        round(float(ra), 4),
+        round(float(dec), 4),
+        float(size_arcsec),
+        str(colormap).lower(),
+    )
+    cached_lru = cutout_png_lru_cache.get(lru_key)
+    if cached_lru is not None:
+        return cached_lru[0], cached_lru[1]
+
     cache_key = f"cutout:{access_url}:{round(ra,4)}:{round(dec,4)}:{size_arcsec}:{colormap}"
     cached = spherex_cache.get(cache_key)
     if cached:
+        cutout_png_lru_cache.set(lru_key, (cached["b64"], cached["stats"]))
         return cached["b64"], cached["stats"]
 
     fits_bytes = fetch_fits_cutout(access_url, ra, dec, size_arcsec, timeout_sec)
     b64, stats = fits_to_base64_png(fits_bytes, colormap)
 
+    cutout_png_lru_cache.set(lru_key, (b64, stats))
     spherex_cache.set(cache_key, {"b64": b64, "stats": stats}, ttl_sec=7200.0)
     return b64, stats
 

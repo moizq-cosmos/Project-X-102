@@ -235,7 +235,10 @@
         <div class="track-telemetry-card" id="track-telemetry-card">
           <div class="track-hdr">
             <span class="track-title">✦ Target Track &amp; Proper Motion</span>
-            <span class="track-pa" id="track-pa">PA: —°</span>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="track-badge" id="track-badge">Astrometric</span>
+              <span class="track-pa" id="track-pa">PA: —°</span>
+            </div>
           </div>
           <div class="track-grid">
             <div class="track-item">
@@ -263,6 +266,7 @@
               <span class="track-val" id="track-shift-px">Δpx: — px</span>
             </div>
           </div>
+          <div class="track-signature" id="track-signature"></div>
         </div>
       </div>
     </div>

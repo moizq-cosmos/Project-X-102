@@ -1035,6 +1035,39 @@ body {
   white-space: nowrap;
 }
 
+.track-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  font-family: var(--mono);
+}
+
+.track-badge.photometric {
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  color: #fbbf24;
+}
+
+.track-badge.astrometric {
+  background: rgba(6, 182, 212, 0.18);
+  border: 1px solid rgba(6, 182, 212, 0.55);
+  color: #22d3ee;
+}
+
+.track-signature {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin-top: 8px;
+  line-height: 1.4;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 6px;
+  font-family: var(--sans);
+}
+
 .img-loader {
   position: absolute;
   inset: 0;
