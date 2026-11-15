@@ -1138,7 +1138,10 @@ function loadHtmlImage(src) {
   });
 }
 
-async function computeDiff(signalOrEvent = null) {
+// ─── Diff Computation (P2) ───────────────────────────────────────────────────
+const diffClientCache = new Map();
+
+async function computeDiff(signalOrEvent = null, forceRefresh = false) {
   if (!state.epochA || !state.epochB) {
     if (state.observations && state.observations.length > 0) {
       autoSelectDefaultEpochs();
@@ -1157,6 +1160,33 @@ async function computeDiff(signalOrEvent = null) {
   const btnDiff = document.getElementById("btn-compute-diff");
   const ctx = canvas.getContext("2d");
 
+  const obsA = state.epochA.obs;
+  const obsB = state.epochB.obs;
+
+  const diffCacheKey = `${obsA.obs_id || "a"}:${obsB.obs_id || "b"}:${state.sizeArcsec}`;
+
+  // Instant cache hit: render immediately without network request or spinner
+  if (!forceRefresh && diffClientCache.has(diffCacheKey)) {
+    const cached = diffClientCache.get(diffCacheKey);
+    try {
+      const img = await loadHtmlImage(cached.imgDataUrl);
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      if (placeholder) placeholder.style.display = "none";
+      if (cached.maxDelta >= 2.0 || cached.rms >= 0.5) {
+        bannerEl.style.display = "";
+        statusEl.textContent = `Candidate for human review — not a confirmed discovery (RMS: ${cached.rms.toFixed(4)} DN, Peak Δ: ${cached.maxDelta.toFixed(4)} DN)`;
+      } else {
+        bannerEl.style.display = "none";
+        statusEl.textContent = `Baseline aligned (RMS: ${cached.rms.toFixed(4)} DN) — Candidate residuals highlighted`;
+      }
+      setButtonStates();
+      return;
+    } catch (_) {}
+  }
+
   if (btnDiff) btnDiff.disabled = true;
   statusEl.textContent = "Computing backend calibrated float32 FITS difference…";
   bannerEl.style.display = "none";
@@ -1164,9 +1194,6 @@ async function computeDiff(signalOrEvent = null) {
     placeholder.style.display = "";
     placeholder.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-dim);gap:12px;"><div class="loader-inner" style="width:36px;height:36px;border:3px solid rgba(0,217,255,0.2);border-top-color:var(--accent,#00d9ff);border-radius:50%;animation:spin 0.8s linear infinite;"></div><div>Computing backend calibrated float32 FITS difference…</div></div>';
   }
-
-  const obsA = state.epochA.obs;
-  const obsB = state.epochB.obs;
 
   const targetRa = obsA.ra != null ? obsA.ra : (obsB.ra != null ? obsB.ra : state.ra);
   const targetDec = obsA.dec != null ? obsA.dec : (obsB.dec != null ? obsB.dec : state.dec);
@@ -1182,7 +1209,7 @@ async function computeDiff(signalOrEvent = null) {
   if (obsB.access_url) params.set("access_url_b", obsB.access_url);
 
   const timeoutCtrl = new AbortController();
-  const timeoutId = setTimeout(() => timeoutCtrl.abort(), 8000);
+  const timeoutId = setTimeout(() => timeoutCtrl.abort(), 10000);
   const effectiveSignal = signal
     ? (AbortSignal.any ? AbortSignal.any([signal, timeoutCtrl.signal]) : signal)
     : timeoutCtrl.signal;
@@ -1207,6 +1234,12 @@ async function computeDiff(signalOrEvent = null) {
     const rms = data.rms_dn != null ? Number(data.rms_dn) : 0.0;
     const maxDelta = data.max_delta != null ? Number(data.max_delta) : 0.0;
 
+    diffClientCache.set(diffCacheKey, {
+      imgDataUrl,
+      rms,
+      maxDelta,
+    });
+
     if (maxDelta >= 2.0 || rms >= 0.5) {
       bannerEl.style.display = "";
       statusEl.textContent = `Candidate for human review — not a confirmed discovery (RMS: ${rms.toFixed(4)} DN, Peak Δ: ${maxDelta.toFixed(4)} DN)`;
@@ -1216,17 +1249,18 @@ async function computeDiff(signalOrEvent = null) {
     }
 
   } catch (err) {
-    if (err.name === "AbortError" || (signal && signal.aborted)) {
-      return;
-    }
-    statusEl.textContent = `Diff error: ${err.message}`;
+    const isAbort = err.name === "AbortError" || (signal && signal.aborted);
+    statusEl.textContent = isAbort ? "Diff computation timed out. Click to retry." : `Diff error: ${err.message}`;
     if (placeholder) {
       placeholder.style.display = "";
-      placeholder.textContent = `Diff error: ${err.message}`;
+      placeholder.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-dim);gap:8px;"><div style="color:var(--accent,#00d9ff);font-weight:600;">${isAbort ? "Diff Request Timed Out" : "Diff Error"}</div><div style="font-size:12px;">${isAbort ? "Upstream archive was slow. Click below to retry instantly." : escapeHtml(err.message)}</div><button class="btn-sm" id="btn-diff-retry" style="margin-top:6px;cursor:pointer;">↻ Retry Diff</button></div>`;
+      const retryBtn = document.getElementById("btn-diff-retry");
+      if (retryBtn) retryBtn.onclick = () => computeDiff(null, true);
     }
   } finally {
     clearTimeout(timeoutId);
     setButtonStates();
+    if (btnDiff) btnDiff.disabled = false;
   }
 }
 
@@ -1539,7 +1573,7 @@ function setupEventListeners() {
   });
 
   // P2 Compute Diff
-  document.getElementById("btn-compute-diff").addEventListener("click", () => computeDiff());
+  document.getElementById("btn-compute-diff").addEventListener("click", () => computeDiff(null, true));
 
   // Multi-Epoch ZIP Export
   const btnZip = document.getElementById("btn-download-zip");
