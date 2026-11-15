@@ -223,9 +223,6 @@ async function runQuery() {
 
 // Backward-compatible alias
 const loadObservations = runQuery;
-    setLoadingState(false);
-  }
-}
 
 function setLoadingState(loading) {
   const btn = document.getElementById("btn-resolve");
