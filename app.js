@@ -115,6 +115,9 @@ async function apiFetch(url, options = {}) {
   try {
     resp = await fetch(url, options);
   } catch (netErr) {
+    if (netErr.name === "AbortError" || options.signal?.aborted) {
+      throw netErr;
+    }
     showErrorBanner(0, `Network error: ${netErr.message}`, url.replace(API_BASE, ""));
     throw netErr;
   }
@@ -149,19 +152,37 @@ async function probeHealth() {
   }
 }
 
-// ─── Load Observations ────────────────────────────────────────────────────────
+// ─── Query Controller & Observation Loader ───────────────────────────────────
 
-async function loadObservations() {
-  const { ra, dec, radiusDeg, maxFrames } = state;
-  const url = `${API_BASE}/observations?ra=${ra}&dec=${dec}&radius_deg=${radiusDeg}&max_frames=${maxFrames}`;
+let queryAbortController = null;
+
+async function runQuery() {
+  if (queryAbortController) {
+    queryAbortController.abort();
+  }
+  queryAbortController = new AbortController();
+  const signal = queryAbortController.signal;
+
+  const queryRa = state.ra;
+  const queryDec = state.dec;
+  const { radiusDeg, maxFrames } = state;
+  const url = `${API_BASE}/observations?ra=${queryRa}&dec=${queryDec}&radius_deg=${radiusDeg}&max_frames=${maxFrames}`;
 
   setLoadingState(true);
 
   try {
-    const resp = await apiFetch(url);
+    const resp = await apiFetch(url, { signal });
     const data = await resp.json();
 
-    state.observations = Array.isArray(data.observations) ? data.observations : [];
+    if (signal.aborted) return;
+
+    // Scope query coordinates directly onto each observation record
+    const rawObs = Array.isArray(data.observations) ? data.observations : [];
+    state.observations = rawObs.map(obs => ({
+      ...obs,
+      ra: obs.ra != null ? Number(obs.ra) : queryRa,
+      dec: obs.dec != null ? Number(obs.dec) : queryDec,
+    }));
 
     updateObsStats(data);
 
@@ -172,17 +193,28 @@ async function loadObservations() {
       renderTimeline();
       renderTable();
       autoSelectDefaultEpochs();
-      await loadEpoch(0);
+      await loadEpoch(0, signal);
       const activeTab = document.querySelector(".tab-btn.active")?.dataset.tab;
       if (activeTab === "compare" || activeTab === "diff") {
-        await loadComparison();
-        if (activeTab === "diff") await computeDiff();
+        await loadComparison(signal);
+        if (activeTab === "diff") await computeDiff(signal);
       }
     }
     syncUrlParams();
-  } catch (_) {
+  } catch (err) {
+    if (err.name === "AbortError" || signal.aborted) {
+      return;
+    }
     showEmpty(true);
   } finally {
+    if (!signal.aborted) {
+      setLoadingState(false);
+    }
+  }
+}
+
+// Backward-compatible alias
+const loadObservations = runQuery;
     setLoadingState(false);
   }
 }
@@ -260,7 +292,7 @@ function updateEpochCounter(idx) {
 
 // ─── Load & Display a Single Epoch ───────────────────────────────────────────
 
-async function loadEpoch(idx) {
+async function loadEpoch(idx, signal = null) {
   const visible = getVisibleObservations();
   const obs = visible[idx];
   if (!obs) return;
@@ -269,7 +301,7 @@ async function loadEpoch(idx) {
   setActiveEpoch(idx);
   updateMetaPills(obs);
   highlightTableRow(idx);
-  await loadCutout(obs);
+  await loadCutout(obs, signal);
 }
 
 function updateMetaPills(obs) {
@@ -283,7 +315,7 @@ function updateMetaPills(obs) {
   setText("pill-wl", `λ: ${wlMin}–${wlMax} μm`);
 }
 
-async function loadCutout(obs) {
+async function loadCutout(obs, signal = null) {
   const img = document.getElementById("cutout-img");
   if (!obs || !obs.access_url) {
     if (img) img.removeAttribute("src");
@@ -294,17 +326,22 @@ async function loadCutout(obs) {
   loader.classList.remove("hidden");
   img.style.opacity = "0.3";
 
+  // Use scoped coordinates directly from obs to prevent target-mismatch race condition
+  const targetRa = obs.ra != null ? obs.ra : state.ra;
+  const targetDec = obs.dec != null ? obs.dec : state.dec;
+
   const params = new URLSearchParams({
     access_url: obs.access_url,
     obs_id: obs.obs_id || "",
-    ra: state.ra,
-    dec: state.dec,
+    ra: targetRa,
+    dec: targetDec,
     size_arcsec: state.sizeArcsec,
     colormap: state.colormap,
   });
 
   try {
-    const resp = await apiFetch(`${API_BASE}/cutout?${params}`);
+    const fetchSignal = signal || queryAbortController?.signal;
+    const resp = await apiFetch(`${API_BASE}/cutout?${params}`, { signal: fetchSignal });
     const data = await resp.json();
     if (data.data_url) {
       img.src = data.data_url;
@@ -313,11 +350,16 @@ async function loadCutout(obs) {
       img.removeAttribute("src");
       img.style.opacity = "1";
     }
-  } catch (_) {
+  } catch (err) {
+    if (err.name === "AbortError" || (signal && signal.aborted)) {
+      return;
+    }
     img.removeAttribute("src");
     img.style.opacity = "1";
   } finally {
-    loader.classList.add("hidden");
+    if (!signal || !signal.aborted) {
+      loader.classList.add("hidden");
+    }
   }
 }
 
@@ -626,7 +668,7 @@ function onEpochSelectionChanged() {
 
 // ─── P1: Side-by-Side Comparison ──────────────────────────────────────────────
 
-async function loadComparison() {
+async function loadComparison(signal = null) {
   if (!state.epochA || !state.epochB) return;
 
   const imgA = document.getElementById("cmp-img-a");
@@ -653,16 +695,19 @@ async function loadComparison() {
 
   async function fetchCutoutDataUrl(obs) {
     if (!obs || !obs.access_url) return null;
+    const targetRa = obs.ra != null ? obs.ra : state.ra;
+    const targetDec = obs.dec != null ? obs.dec : state.dec;
     const params = new URLSearchParams({
       access_url: obs.access_url,
       obs_id: obs.obs_id || "",
-      ra: state.ra,
-      dec: state.dec,
+      ra: targetRa,
+      dec: targetDec,
       size_arcsec: state.sizeArcsec,
       colormap: state.colormap,
     });
     try {
-      const resp = await apiFetch(`${API_BASE}/cutout?${params}`);
+      const fetchSignal = signal || queryAbortController?.signal;
+      const resp = await apiFetch(`${API_BASE}/cutout?${params}`, { signal: fetchSignal });
       const data = await resp.json();
       return data.data_url || null;
     } catch (_) {
@@ -751,7 +796,7 @@ function loadHtmlImage(src) {
   });
 }
 
-async function computeDiff() {
+async function computeDiff(signal = null) {
   if (!state.epochA || !state.epochB) {
     if (state.observations && state.observations.length > 0) {
       autoSelectDefaultEpochs();
@@ -773,18 +818,22 @@ async function computeDiff() {
   const obsA = state.epochA.obs;
   const obsB = state.epochB.obs;
 
+  const targetRa = obsA.ra != null ? obsA.ra : (obsB.ra != null ? obsB.ra : state.ra);
+  const targetDec = obsA.dec != null ? obsA.dec : (obsB.dec != null ? obsB.dec : state.dec);
+
   const params = new URLSearchParams({
     obs_id_a: obsA.obs_id || "",
     obs_id_b: obsB.obs_id || "",
-    ra: state.ra,
-    dec: state.dec,
+    ra: targetRa,
+    dec: targetDec,
     size_arcsec: state.sizeArcsec,
   });
   if (obsA.access_url) params.set("access_url_a", obsA.access_url);
   if (obsB.access_url) params.set("access_url_b", obsB.access_url);
 
   try {
-    const resp = await apiFetch(`${API_BASE}/diff?${params}`);
+    const fetchSignal = signal || queryAbortController?.signal;
+    const resp = await apiFetch(`${API_BASE}/diff?${params}`, { signal: fetchSignal });
     const data = await resp.json();
 
     const imgDataUrl = data.data_url || (data.image_base64 ? `data:image/png;base64,${data.image_base64}` : null);
@@ -812,6 +861,9 @@ async function computeDiff() {
     }
 
   } catch (err) {
+    if (err.name === "AbortError" || (signal && signal.aborted)) {
+      return;
+    }
     statusEl.textContent = `Diff error: ${err.message}`;
     if (placeholder) {
       placeholder.style.display = "";
