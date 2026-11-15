@@ -17,6 +17,7 @@ import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from services import (
@@ -41,7 +42,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # ─── FastAPI App ──────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="SPHEREx Time Explorer",
+    title="Project X-102",
     description=(
         "NASA/IPAC IRSA SIA2 gateway for SPHEREx DR1 and QR3 time-domain observations. "
         "NEVER queries spherex_qr2 due to calibration differences."
@@ -56,6 +57,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if (BASE_DIR / "static").exists():
+    app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 # ─── Allowed Collections Guard ────────────────────────────────────────────────
 
@@ -96,6 +100,16 @@ def serve_frontend():
     if index_path.exists():
         return FileResponse(index_path)
     return RedirectResponse(url="/docs", status_code=307)
+
+
+@app.get("/logo.jpg", include_in_schema=False)
+@app.get("/static/logo.jpg", include_in_schema=False)
+def serve_logo():
+    """Serve application brand logo."""
+    for p in (BASE_DIR / "static" / "logo.jpg", BASE_DIR / "logo.jpg"):
+        if p.exists():
+            return FileResponse(p, media_type="image/jpeg")
+    raise HTTPException(status_code=404, detail="Brand logo not found")
 
 
 @app.get("/styles.css", include_in_schema=False)
@@ -141,7 +155,7 @@ def health_check():
     cache_stats = spherex_cache.stats()
     return {
         "status": "healthy",
-        "service": "SPHEREx Time Explorer",
+        "service": "Project X-102",
         "version": app.version,
         "allowed_collections": list(ALLOWED_COLLECTIONS),
         "never_query": "spherex_qr2",

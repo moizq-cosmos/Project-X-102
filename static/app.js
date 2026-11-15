@@ -1,5 +1,5 @@
 /**
- * SPHEREx Time Explorer — app.js
+ * Project X-102 — app.js
  * NASA-IPAC Observational Gateway
  * Real IRSA SIA2 data: spherex_dr1 + spherex_qr3 ONLY (never spherex_qr2)
  */
@@ -7,11 +7,31 @@
 "use strict";
 
 // ─── API Base ────────────────────────────────────────────────────────────────
-// When running over HTTP/HTTPS, relative paths ("") are used for bulletproof same-origin requests.
-// Falls back to http://127.0.0.1:8000 only when loaded directly from the local filesystem (file://).
-const API_BASE = (typeof window !== "undefined" && window.location.protocol.startsWith("http"))
-  ? ""
-  : "http://127.0.0.1:8000";
+// Dynamically resolves backend endpoint across local dev ports, Live Server, and production.
+const API_BASE = (() => {
+  if (typeof window === "undefined" || !window.location) return "http://127.0.0.1:8000";
+  if (window.__API_BASE__) return window.__API_BASE__;
+  try {
+    const stored = localStorage.getItem("astro_api_base");
+    if (stored) return stored;
+  } catch (_) {}
+
+  const { protocol, hostname, port } = window.location;
+  // Direct file opening or non-http
+  if (protocol === "file:" || !protocol.startsWith("http")) return "http://127.0.0.1:8000";
+
+  // Running locally
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    // If running on a static dev port (Live Server 5500, Vite 5173, etc.), target FastAPI on 8000
+    if (port && port !== "8000") {
+      return `http://${hostname}:8000`;
+    }
+    return "";
+  }
+
+  // Running on Render or remote production host (same origin)
+  return "";
+})();
 
 // ─── Application State ───────────────────────────────────────────────────────
 const state = {
@@ -23,6 +43,7 @@ const state = {
   selectedBand: "SPHEREx-D3",
   colormap: "inferno",
   sizeArcsec: 100,
+  showTracks: true,
   observations: [],
   currentEpochIdx: 0,
   epochA: null,   // { index, obs }
@@ -33,6 +54,139 @@ const state = {
   imgCacheB: null,
   errorCounter: 0,
 };
+
+// ─── Target Catalog Proper Motions ───────────────────────────────────────────
+const TARGET_PROPER_MOTIONS = {
+  "barnard's star": { pm_ra: -798.58, pm_dec: 10328.12, total: 10359.0, pa: 355.6, ra0: 269.4521, dec0: 4.6934 },
+  "barnards star": { pm_ra: -798.58, pm_dec: 10328.12, total: 10359.0, pa: 355.6, ra0: 269.4521, dec0: 4.6934 },
+  "wise 0855": { pm_ra: -8123.7, pm_dec: 673.2, total: 8151.6, pa: 274.7, ra0: 133.7951, dec0: -7.2451 },
+  "wise0855": { pm_ra: -8123.7, pm_dec: 673.2, total: 8151.6, pa: 274.7, ra0: 133.7951, dec0: -7.2451 },
+  "epsilon indi b": { pm_ra: 3960.9, pm_dec: -2539.2, total: 4704.0, pa: 122.7, ra0: 331.0771, dec0: -56.7825 },
+  "rw aurigae": { pm_ra: 4.9, pm_dec: -21.8, total: 22.3, pa: 167.3, ra0: 76.9565, dec0: 30.4014 },
+  "r draconis": { pm_ra: -6.2, pm_dec: 12.4, total: 13.9, pa: 333.4, ra0: 248.1633, dec0: 66.7556 },
+};
+
+function getTargetProperMotion() {
+  const name = (state.targetName || "").trim().toLowerCase();
+  for (const [k, v] of Object.entries(TARGET_PROPER_MOTIONS)) {
+    if (name.includes(k) || k.includes(name)) return v;
+  }
+  for (const v of Object.values(TARGET_PROPER_MOTIONS)) {
+    if (Math.abs(state.ra - v.ra0) < 0.25 && Math.abs(state.dec - v.dec0) < 0.25) {
+      return v;
+    }
+  }
+  return null;
+}
+
+function updateTrackingTelemetry(obs) {
+  if (!obs) return;
+
+  const pm = getTargetProperMotion();
+  const mjd = obs.mjd != null ? Number(obs.mjd) : 60800.0;
+  // Elapsed time since J2000.0 (MJD 51544.5) in years
+  const dt_yr = (mjd - 51544.5) / 365.25;
+
+  // Relative shift compared to Epoch 0 in years
+  const firstObs = state.observations && state.observations.length > 0 ? state.observations[0] : obs;
+  const mjd0 = firstObs.mjd != null ? Number(firstObs.mjd) : mjd;
+  const dt_rel_yr = (mjd - mjd0) / 365.25;
+
+  const ra0 = pm ? pm.ra0 : state.ra;
+  const dec0 = pm ? pm.dec0 : state.dec;
+
+  let expRa = ra0;
+  let expDec = dec0;
+  let totalShiftArcsec = 0.0;
+  let pxShift = 0.0;
+  let shiftRaRelArcsec = 0.0;
+  let shiftDecRelArcsec = 0.0;
+
+  if (pm) {
+    const cosDec = Math.cos((dec0 * Math.PI) / 180.0);
+    const dRaDeg = cosDec !== 0 ? (pm.pm_ra * dt_yr) / (1000.0 * 3600.0 * cosDec) : 0;
+    const dDecDeg = (pm.pm_dec * dt_yr) / (1000.0 * 3600.0);
+    expRa = ra0 + dRaDeg;
+    expDec = dec0 + dDecDeg;
+
+    shiftRaRelArcsec = (pm.pm_ra * dt_rel_yr) / 1000.0;
+    shiftDecRelArcsec = (pm.pm_dec * dt_rel_yr) / 1000.0;
+    totalShiftArcsec = Math.abs((pm.total * dt_rel_yr) / 1000.0);
+    pxShift = totalShiftArcsec / 6.15; // 6.15 arcsec / pixel for SPHEREx
+
+    setText("track-pa", `PA: ${pm.pa.toFixed(1)}°`);
+    setText("track-pm", `μ_α: ${pm.pm_ra >= 0 ? "+" : ""}${pm.pm_ra.toFixed(1)} | μ_δ: ${pm.pm_dec >= 0 ? "+" : ""}${pm.pm_dec.toFixed(1)} mas/yr`);
+    setText("track-total", `μ_tot: ${pm.total.toFixed(1)} mas/yr`);
+    setText("track-exp-ra", `${expRa.toFixed(5)}°`);
+    setText("track-exp-dec", `${expDec >= 0 ? "+" : ""}${expDec.toFixed(5)}°`);
+    setText("track-shift-arcsec", `Δθ: ${totalShiftArcsec.toFixed(3)}"`);
+    setText("track-shift-px", `Δpx: ${pxShift.toFixed(2)} px`);
+  } else {
+    setText("track-pa", "PA: —°");
+    setText("track-pm", "μ_α: 0.0 | μ_δ: 0.0 mas/yr");
+    setText("track-total", "μ_tot: 0.0 mas/yr");
+    setText("track-exp-ra", `${state.ra.toFixed(5)}°`);
+    setText("track-exp-dec", `${state.dec >= 0 ? "+" : ""}${state.dec.toFixed(5)}°`);
+    setText("track-shift-arcsec", "Δθ: 0.000\"");
+    setText("track-shift-px", "Δpx: 0.00 px");
+  }
+
+  // Draw overlay vector and markers
+  const overlay = document.getElementById("tracking-overlay");
+  const line = document.getElementById("pm-vector-line");
+  const epochMarker = document.getElementById("pm-epoch-marker");
+  const originMarker = document.getElementById("pm-origin-marker");
+  const label = document.getElementById("pm-marker-label");
+
+  if (overlay && state.showTracks) {
+    const boxSize = state.sizeArcsec || 100.0;
+    const center = 50.0; // SVG viewBox center (50, 50)
+
+    // North-Up (+Dec is UP -> SVG y decreases)
+    // East-Left (+RA is LEFT -> SVG x decreases)
+    const markerX = center - (shiftRaRelArcsec / boxSize) * 100.0;
+    const markerY = center - (shiftDecRelArcsec / boxSize) * 100.0;
+
+    // Projected 1-year track vector line if target has proper motion
+    if (pm && pm.total > 0) {
+      const track1yrRaArcsec = pm.pm_ra / 1000.0;
+      const track1yrDecArcsec = pm.pm_dec / 1000.0;
+      const trackEndX = center - (track1yrRaArcsec / boxSize) * 100.0;
+      const trackEndY = center - (track1yrDecArcsec / boxSize) * 100.0;
+
+      if (line) {
+        line.setAttribute("x1", center.toFixed(2));
+        line.setAttribute("y1", center.toFixed(2));
+        line.setAttribute("x2", trackEndX.toFixed(2));
+        line.setAttribute("y2", trackEndY.toFixed(2));
+        line.style.display = "";
+      }
+    } else if (line) {
+      line.style.display = "none";
+    }
+
+    if (epochMarker) {
+      epochMarker.setAttribute("cx", markerX.toFixed(2));
+      epochMarker.setAttribute("cy", markerY.toFixed(2));
+      epochMarker.style.display = "";
+    }
+    if (originMarker) {
+      originMarker.setAttribute("cx", center.toFixed(2));
+      originMarker.setAttribute("cy", center.toFixed(2));
+      originMarker.style.display = "";
+    }
+    if (label) {
+      if (pm && totalShiftArcsec > 0.01) {
+        label.setAttribute("x", (markerX + 2.5).toFixed(2));
+        label.setAttribute("y", (markerY - 2.5).toFixed(2));
+        label.textContent = `Δθ: ${totalShiftArcsec.toFixed(2)}" (${pxShift.toFixed(1)}px)`;
+        label.style.display = "";
+      } else {
+        label.style.display = "none";
+      }
+    }
+  }
+}
 
 // ─── URL Query Parameter Synchronization ──────────────────────────────────────
 
@@ -132,7 +286,9 @@ async function apiFetch(url, options = {}) {
       const json = await resp.json();
       detail = json.detail || json.message || JSON.stringify(json);
     } catch (_) {}
-    showErrorBanner(resp.status, detail, url.replace(API_BASE, ""));
+    if (resp.status !== 422) {
+      showErrorBanner(resp.status, detail, url.replace(API_BASE, ""));
+    }
     const err = new Error(detail);
     err.status = resp.status;
     throw err;
@@ -148,15 +304,25 @@ async function probeHealth() {
   if (!dot || !txt) return;
 
   try {
-    const resp = await fetch(`${API_BASE}/health`, { cache: "no-store" });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(`${API_BASE}/health`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     dot.className = "dot online";
-    txt.textContent = "Online: SPHEREx DR1 & QR3";
+    txt.textContent = "Online: Project X-102 (DR1 & QR3)";
   } catch (err) {
     console.warn("Health probe notice:", err);
     dot.className = "dot offline";
-    txt.textContent = "API Offline";
+    if (err.name === "AbortError") {
+      txt.textContent = "API Connecting (Waking up...)";
+    } else {
+      txt.textContent = "API Offline (Check port 8000)";
+    }
   }
 }
 
@@ -305,6 +471,7 @@ async function loadEpoch(idx, signal = null) {
   state.currentEpochIdx = idx;
   setActiveEpoch(idx);
   updateMetaPills(obs);
+  updateTrackingTelemetry(obs);
   highlightTableRow(idx);
   await loadCutout(obs, signal);
 }
@@ -357,6 +524,19 @@ async function loadCutout(obs, signal = null) {
     }
   } catch (err) {
     if (err.name === "AbortError" || (signal && signal.aborted)) {
+      return;
+    }
+    if (err.status === 422) {
+      console.warn("Cutout 422 (edge-clipped), displaying notice...");
+      if (img) img.removeAttribute("src");
+      setText("pill-obs-id", `obs_id: ${obs.obs_id || "—"} (Edge-Clipped)`);
+      if (state.blinkInterval) {
+        const visible = getVisibleObservations();
+        if (visible.length > 1) {
+          const next = (state.currentEpochIdx + 1) % visible.length;
+          loadEpoch(next, signal);
+        }
+      }
       return;
     }
     img.removeAttribute("src");
@@ -1163,6 +1343,23 @@ function setupEventListeners() {
     const r = document.getElementById("reticle");
     if (r) r.style.display = r.style.display === "none" ? "" : "none";
   });
+
+  // Star Tracking Overlay toggle
+  const btnTracks = document.getElementById("btn-toggle-tracks");
+  if (btnTracks) {
+    btnTracks.addEventListener("click", () => {
+      state.showTracks = !state.showTracks;
+      btnTracks.classList.toggle("active", state.showTracks);
+      const overlay = document.getElementById("tracking-overlay");
+      if (overlay) overlay.style.display = state.showTracks ? "" : "none";
+      const card = document.getElementById("track-telemetry-card");
+      if (card) card.style.display = state.showTracks ? "" : "none";
+      const visible = getVisibleObservations();
+      if (visible.length > 0 && state.currentEpochIdx >= 0 && state.currentEpochIdx < visible.length) {
+        updateTrackingTelemetry(visible[state.currentEpochIdx]);
+      }
+    });
+  }
 
   // Health button
   document.getElementById("btn-health").addEventListener("click", probeHealth);
