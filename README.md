@@ -124,6 +124,35 @@ source .venv/bin/activate       # On Linux/macOS
 pip install -r requirements.txt
 ```
 
+### 2. Run the Server
+```bash
+# Start Uvicorn development server
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
+Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser (redirects to interactive API `/docs`).
+
+### 3. Run Automated Verification Suite
+```bash
+python verify_all_targets.py
+```
+
+---
+
+## 🌐 Deploy to Render
+
+This repository is pre-configured for instant deployment on [Render](https://render.com) using the included `render.yaml`:
+
+1. Fork or push this repository to GitHub.
+2. Log in to [Render](https://dashboard.render.com).
+3. Click **New +** → **Blueprint**.
+4. Connect your GitHub repository. Render will automatically detect `render.yaml` and configure:
+   - **Environment:** `Python 3.12`
+   - **Build Command:** `pip install -r requirements.txt`
+   - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+5. Click **Apply**. Your app will be live with a free HTTPS URL.
+
+---
+
 
 ## 📁 Repository & Branch Structure
 
