@@ -57,13 +57,41 @@ const state = {
 
 // ─── Target Catalog Proper Motions ───────────────────────────────────────────
 const TARGET_PROPER_MOTIONS = {
-  "barnard's star": { pm_ra: -798.58, pm_dec: 10328.12, total: 10359.0, pa: 355.6, ra0: 269.4521, dec0: 4.6934 },
-  "barnards star": { pm_ra: -798.58, pm_dec: 10328.12, total: 10359.0, pa: 355.6, ra0: 269.4521, dec0: 4.6934 },
-  "wise 0855": { pm_ra: -8123.7, pm_dec: 673.2, total: 8151.6, pa: 274.7, ra0: 133.7951, dec0: -7.2451 },
-  "wise0855": { pm_ra: -8123.7, pm_dec: 673.2, total: 8151.6, pa: 274.7, ra0: 133.7951, dec0: -7.2451 },
-  "epsilon indi b": { pm_ra: 3960.9, pm_dec: -2539.2, total: 4704.0, pa: 122.7, ra0: 331.0771, dec0: -56.7825 },
-  "rw aurigae": { pm_ra: 4.9, pm_dec: -21.8, total: 22.3, pa: 167.3, ra0: 76.9565, dec0: 30.4014 },
-  "r draconis": { pm_ra: -6.2, pm_dec: 12.4, total: 13.9, pa: 333.4, ra0: 248.1633, dec0: 66.7556 },
+  "barnard's star": {
+    pm_ra: -798.58, pm_dec: 10328.12, total: 10359.0, pa: 355.6, ra0: 269.4521, dec0: 4.6934,
+    signature: 'High Proper Motion (10.36"/yr)',
+    type: "astrometric"
+  },
+  "barnards star": {
+    pm_ra: -798.58, pm_dec: 10328.12, total: 10359.0, pa: 355.6, ra0: 269.4521, dec0: 4.6934,
+    signature: 'High Proper Motion (10.36"/yr)',
+    type: "astrometric"
+  },
+  "wise 0855": {
+    pm_ra: -8123.7, pm_dec: 673.2, total: 8151.6, pa: 274.7, ra0: 133.7951, dec0: -7.2451,
+    signature: 'High Proper Motion (8.15"/yr)',
+    type: "astrometric"
+  },
+  "wise0855": {
+    pm_ra: -8123.7, pm_dec: 673.2, total: 8151.6, pa: 274.7, ra0: 133.7951, dec0: -7.2451,
+    signature: 'High Proper Motion (8.15"/yr)',
+    type: "astrometric"
+  },
+  "epsilon indi b": {
+    pm_ra: 3960.9, pm_dec: -2539.2, total: 4704.0, pa: 122.7, ra0: 331.0771, dec0: -56.7825,
+    signature: 'High Proper Motion (4.70"/yr)',
+    type: "astrometric"
+  },
+  "rw aurigae": {
+    pm_ra: 4.9, pm_dec: -21.8, total: 22.3, pa: 167.3, ra0: 76.9565, dec0: 30.4014,
+    signature: 'Accretion Dipper / Brightness Variable (0.022"/yr proper motion — sub-pixel static position; inspect flux/Diff View for dimming events)',
+    type: "photometric"
+  },
+  "r draconis": {
+    pm_ra: -6.2, pm_dec: 12.4, total: 13.9, pa: 333.4, ra0: 248.1633, dec0: 66.7556,
+    signature: 'Mira Long-Period Variable (~245d period, 0.014"/yr proper motion — sub-pixel static position; inspect brightness change)',
+    type: "photometric"
+  },
 };
 
 function getTargetProperMotion() {
@@ -130,6 +158,25 @@ function updateTrackingTelemetry(obs) {
     setText("track-shift-px", "Δpx: 0.00 px");
   }
 
+  // Update Status Badge and Signature
+  const isStationary = pm ? (pm.type === "photometric" || pxShift < 0.05) : false;
+  const badgeEl = document.getElementById("track-badge");
+  const sigEl = document.getElementById("track-signature");
+
+  if (badgeEl) {
+    if (isStationary) {
+      badgeEl.className = "track-badge photometric";
+      badgeEl.textContent = "Stationary Astrometry (Photometric Variable)";
+    } else {
+      badgeEl.className = "track-badge astrometric";
+      badgeEl.textContent = "High Proper Motion";
+    }
+  }
+
+  if (sigEl) {
+    sigEl.textContent = pm?.signature || "Astrometric coordinate tracking active across observation baseline.";
+  }
+
   // Draw overlay vector and markers
   const overlay = document.getElementById("tracking-overlay");
   const line = document.getElementById("pm-vector-line");
@@ -146,42 +193,62 @@ function updateTrackingTelemetry(obs) {
     const markerX = center - (shiftRaRelArcsec / boxSize) * 100.0;
     const markerY = center - (shiftDecRelArcsec / boxSize) * 100.0;
 
-    // Projected 1-year track vector line if target has proper motion
-    if (pm && pm.total > 0) {
-      const track1yrRaArcsec = pm.pm_ra / 1000.0;
-      const track1yrDecArcsec = pm.pm_dec / 1000.0;
-      const trackEndX = center - (track1yrRaArcsec / boxSize) * 100.0;
-      const trackEndY = center - (track1yrDecArcsec / boxSize) * 100.0;
-
-      if (line) {
-        line.setAttribute("x1", center.toFixed(2));
-        line.setAttribute("y1", center.toFixed(2));
-        line.setAttribute("x2", trackEndX.toFixed(2));
-        line.setAttribute("y2", trackEndY.toFixed(2));
-        line.style.display = "";
+    if (isStationary) {
+      if (line) line.style.display = "none";
+      if (epochMarker) {
+        epochMarker.setAttribute("cx", center.toFixed(2));
+        epochMarker.setAttribute("cy", center.toFixed(2));
+        epochMarker.style.display = "";
       }
-    } else if (line) {
-      line.style.display = "none";
-    }
-
-    if (epochMarker) {
-      epochMarker.setAttribute("cx", markerX.toFixed(2));
-      epochMarker.setAttribute("cy", markerY.toFixed(2));
-      epochMarker.style.display = "";
-    }
-    if (originMarker) {
-      originMarker.setAttribute("cx", center.toFixed(2));
-      originMarker.setAttribute("cy", center.toFixed(2));
-      originMarker.style.display = "";
-    }
-    if (label) {
-      if (pm && totalShiftArcsec > 0.01) {
-        label.setAttribute("x", (markerX + 2.5).toFixed(2));
-        label.setAttribute("y", (markerY - 2.5).toFixed(2));
-        label.textContent = `Δθ: ${totalShiftArcsec.toFixed(2)}" (${pxShift.toFixed(1)}px)`;
+      if (originMarker) {
+        originMarker.setAttribute("cx", center.toFixed(2));
+        originMarker.setAttribute("cy", center.toFixed(2));
+        originMarker.style.display = "";
+      }
+      if (label) {
+        label.textContent = "Static (<0.05 px)";
+        label.setAttribute("x", "52");
+        label.setAttribute("y", "48");
         label.style.display = "";
-      } else {
-        label.style.display = "none";
+      }
+    } else {
+      // Projected 1-year track vector line if target has proper motion
+      if (pm && pm.total > 0) {
+        const track1yrRaArcsec = pm.pm_ra / 1000.0;
+        const track1yrDecArcsec = pm.pm_dec / 1000.0;
+        const trackEndX = center - (track1yrRaArcsec / boxSize) * 100.0;
+        const trackEndY = center - (track1yrDecArcsec / boxSize) * 100.0;
+
+        if (line) {
+          line.setAttribute("x1", center.toFixed(2));
+          line.setAttribute("y1", center.toFixed(2));
+          line.setAttribute("x2", trackEndX.toFixed(2));
+          line.setAttribute("y2", trackEndY.toFixed(2));
+          line.style.display = "";
+        }
+      } else if (line) {
+        line.style.display = "none";
+      }
+
+      if (epochMarker) {
+        epochMarker.setAttribute("cx", markerX.toFixed(2));
+        epochMarker.setAttribute("cy", markerY.toFixed(2));
+        epochMarker.style.display = "";
+      }
+      if (originMarker) {
+        originMarker.setAttribute("cx", center.toFixed(2));
+        originMarker.setAttribute("cy", center.toFixed(2));
+        originMarker.style.display = "";
+      }
+      if (label) {
+        if (pm && totalShiftArcsec > 0.01) {
+          label.setAttribute("x", (markerX + 2.5).toFixed(2));
+          label.setAttribute("y", (markerY - 2.5).toFixed(2));
+          label.textContent = `Δθ: ${totalShiftArcsec.toFixed(2)}" (${pxShift.toFixed(1)}px)`;
+          label.style.display = "";
+        } else {
+          label.style.display = "none";
+        }
       }
     }
   }
@@ -268,11 +335,15 @@ function escHtml(str) {
 // ─── Generic Fetch Wrapper ────────────────────────────────────────────────────
 
 async function apiFetch(url, options = {}) {
+  const fetchOpts = { ...options };
+  if (fetchOpts.signal && !(fetchOpts.signal instanceof AbortSignal)) {
+    delete fetchOpts.signal;
+  }
   let resp;
   try {
-    resp = await fetch(url, options);
+    resp = await fetch(url, fetchOpts);
   } catch (netErr) {
-    if (netErr.name === "AbortError" || options.signal?.aborted) {
+    if (netErr.name === "AbortError" || fetchOpts.signal?.aborted) {
       throw netErr;
     }
     showErrorBanner(0, `Network error: ${netErr.message}`, url.replace(API_BASE, ""));
@@ -410,15 +481,28 @@ function showEmpty(isEmpty) {
   }
 }
 
+// ─── Unified Baseline Span Calculation ─────────────────────────────────────────
+function computeObservationsBaselineDays(obsArray) {
+  const list = obsArray || state.observations || [];
+  if (!Array.isArray(list) || list.length < 2) return 0.0;
+  const mjds = list.map(o => Number(o.mjd)).filter(m => !isNaN(m) && m > 0);
+  if (mjds.length < 2) return 0.0;
+  const minMjd = Math.min(...mjds);
+  const maxMjd = Math.max(...mjds);
+  return parseFloat((maxMjd - minMjd).toFixed(2));
+}
+
 function updateObsStats(data) {
   const obs = state.observations;
   const dr1Count = obs.filter(o => o.collection === "spherex_dr1").length;
   const qr3Count = obs.filter(o => o.collection === "spherex_qr3").length;
+  const baselineDays = computeObservationsBaselineDays(obs);
+  state.baselineDays = baselineDays;
 
   setText("stat-total", `${obs.length} observations`);
   setText("stat-dr1", `DR1: ${dr1Count}`);
   setText("stat-qr3", `QR3: ${qr3Count}`);
-  setText("stat-status", data.status || "");
+  setText("stat-status", `Baseline: ${baselineDays} days`);
 
   const cachedEl = document.getElementById("stat-cached");
   if (cachedEl) {
@@ -486,20 +570,76 @@ function updateMetaPills(obs) {
   setText("pill-wl", `λ: ${wlMin}–${wlMax} μm`);
 }
 
-async function loadCutout(obs, signal = null) {
+// ─── Cutout In-Memory Cache & Silent Prefetch ──────────────────────────────────
+const cutoutClientCache = new Map();
+
+function prefetchEpochCutouts(currentIdx) {
+  const visible = getVisibleObservations();
+  if (!visible || visible.length <= 1) return;
+
+  const nextIndices = [currentIdx + 1, currentIdx + 2];
+  for (const nextIdx of nextIndices) {
+    if (nextIdx >= visible.length) continue;
+    const nextObs = visible[nextIdx];
+    if (!nextObs || !nextObs.access_url) continue;
+
+    const targetRa = nextObs.ra != null ? nextObs.ra : state.ra;
+    const targetDec = nextObs.dec != null ? nextObs.dec : state.dec;
+    const cacheKey = `${nextObs.access_url}:${targetRa}:${targetDec}:${state.sizeArcsec}:${state.colormap}`;
+    if (cutoutClientCache.has(cacheKey)) continue;
+
+    const params = new URLSearchParams({
+      access_url: nextObs.access_url,
+      obs_id: nextObs.obs_id || "",
+      ra: targetRa,
+      dec: targetDec,
+      size_arcsec: state.sizeArcsec,
+      colormap: state.colormap,
+    });
+
+    fetch(`${API_BASE}/cutout?${params}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.data_url) {
+          cutoutClientCache.set(cacheKey, data);
+          const preloadImg = new Image();
+          preloadImg.src = data.data_url;
+        }
+      })
+      .catch(() => {});
+  }
+}
+
+async function loadCutout(obs, signalOrEvent = null) {
   const img = document.getElementById("cutout-img");
   if (!obs || !obs.access_url) {
     if (img) img.removeAttribute("src");
     return;
   }
 
-  const loader = document.getElementById("img-loader");
-  loader.classList.remove("hidden");
-  img.style.opacity = "0.3";
+  const signal = (signalOrEvent instanceof AbortSignal)
+    ? signalOrEvent
+    : (queryAbortController?.signal instanceof AbortSignal ? queryAbortController.signal : undefined);
 
   // Use scoped coordinates directly from obs to prevent target-mismatch race condition
   const targetRa = obs.ra != null ? obs.ra : state.ra;
   const targetDec = obs.dec != null ? obs.dec : state.dec;
+  const cacheKey = `${obs.access_url}:${targetRa}:${targetDec}:${state.sizeArcsec}:${state.colormap}`;
+
+  const cachedData = cutoutClientCache.get(cacheKey);
+  if (cachedData && cachedData.data_url) {
+    img.src = cachedData.data_url;
+    img.style.opacity = "1";
+    const loader = document.getElementById("img-loader");
+    if (loader) loader.classList.add("hidden");
+    state.errorCounter = 0;
+    prefetchEpochCutouts(state.currentEpochIdx);
+    return;
+  }
+
+  const loader = document.getElementById("img-loader");
+  loader.classList.remove("hidden");
+  img.style.opacity = "0.3";
 
   const params = new URLSearchParams({
     access_url: obs.access_url,
@@ -511,12 +651,13 @@ async function loadCutout(obs, signal = null) {
   });
 
   try {
-    const fetchSignal = signal || queryAbortController?.signal;
-    const resp = await apiFetch(`${API_BASE}/cutout?${params}`, { signal: fetchSignal });
+    const resp = await apiFetch(`${API_BASE}/cutout?${params}`, { signal });
     const data = await resp.json();
     if (data.data_url) {
+      cutoutClientCache.set(cacheKey, data);
       img.src = data.data_url;
       img.style.opacity = "1";
+      prefetchEpochCutouts(state.currentEpochIdx);
     } else {
       img.removeAttribute("src");
       img.style.opacity = "1";
@@ -852,8 +993,12 @@ function onEpochSelectionChanged() {
 
 // ─── P1: Side-by-Side Comparison ──────────────────────────────────────────────
 
-async function loadComparison(signal = null) {
+async function loadComparison(signalOrEvent = null) {
   if (!state.epochA || !state.epochB) return;
+
+  const signal = (signalOrEvent instanceof AbortSignal)
+    ? signalOrEvent
+    : (queryAbortController?.signal instanceof AbortSignal ? queryAbortController.signal : undefined);
 
   const imgA = document.getElementById("cmp-img-a");
   const imgB = document.getElementById("cmp-img-b");
@@ -881,6 +1026,10 @@ async function loadComparison(signal = null) {
     if (!obs || !obs.access_url) return null;
     const targetRa = obs.ra != null ? obs.ra : state.ra;
     const targetDec = obs.dec != null ? obs.dec : state.dec;
+    const cacheKey = `${obs.access_url}:${targetRa}:${targetDec}:${state.sizeArcsec}:${state.colormap}`;
+    const cachedData = cutoutClientCache.get(cacheKey);
+    if (cachedData?.data_url) return cachedData.data_url;
+
     const params = new URLSearchParams({
       access_url: obs.access_url,
       obs_id: obs.obs_id || "",
@@ -890,9 +1039,11 @@ async function loadComparison(signal = null) {
       colormap: state.colormap,
     });
     try {
-      const fetchSignal = signal || queryAbortController?.signal;
-      const resp = await apiFetch(`${API_BASE}/cutout?${params}`, { signal: fetchSignal });
+      const resp = await apiFetch(`${API_BASE}/cutout?${params}`, { signal });
       const data = await resp.json();
+      if (data?.data_url) {
+        cutoutClientCache.set(cacheKey, data);
+      }
       return data.data_url || null;
     } catch (_) {
       return null;
@@ -980,13 +1131,17 @@ function loadHtmlImage(src) {
   });
 }
 
-async function computeDiff(signal = null) {
+async function computeDiff(signalOrEvent = null) {
   if (!state.epochA || !state.epochB) {
     if (state.observations && state.observations.length > 0) {
       autoSelectDefaultEpochs();
     }
   }
   if (!state.epochA || !state.epochB) return;
+
+  const signal = (signalOrEvent instanceof AbortSignal)
+    ? signalOrEvent
+    : (queryAbortController?.signal instanceof AbortSignal ? queryAbortController.signal : undefined);
 
   const statusEl = document.getElementById("diff-status");
   const bannerEl = document.getElementById("diff-candidate-banner");
@@ -1016,8 +1171,7 @@ async function computeDiff(signal = null) {
   if (obsB.access_url) params.set("access_url_b", obsB.access_url);
 
   try {
-    const fetchSignal = signal || queryAbortController?.signal;
-    const resp = await apiFetch(`${API_BASE}/diff?${params}`, { signal: fetchSignal });
+    const resp = await apiFetch(`${API_BASE}/diff?${params}`, { signal });
     const data = await resp.json();
 
     const imgDataUrl = data.data_url || (data.image_base64 ? `data:image/png;base64,${data.image_base64}` : null);
@@ -1371,7 +1525,7 @@ function setupEventListeners() {
   });
 
   // P2 Compute Diff
-  document.getElementById("btn-compute-diff").addEventListener("click", computeDiff);
+  document.getElementById("btn-compute-diff").addEventListener("click", () => computeDiff());
 
   // Multi-Epoch ZIP Export
   const btnZip = document.getElementById("btn-download-zip");
