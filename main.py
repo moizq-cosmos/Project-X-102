@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from services import (
+    CutoutUnavailableError,
     UpstreamArchiveError,
     UpstreamTimeoutError,
     compute_fits_diff,
@@ -262,6 +263,9 @@ def get_cutout(
             size_arcsec=size_arcsec,
             colormap=colormap,
         )
+    except CutoutUnavailableError as exc:
+        logger.warning("FITS cutout unavailable for %s: %s", obs_id, exc)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except UpstreamTimeoutError as exc:
         logger.warning("FITS cutout timeout for %s: %s", obs_id, exc)
         raise HTTPException(status_code=504, detail=str(exc)) from exc
@@ -313,6 +317,9 @@ def get_diff(
             access_url_a=access_url_a,
             access_url_b=access_url_b,
         )
+    except CutoutUnavailableError as exc:
+        logger.warning("FITS diff cutout unavailable between %s and %s: %s", obs_id_a, obs_id_b, exc)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except UpstreamTimeoutError as exc:
         logger.warning("FITS diff timeout between %s and %s: %s", obs_id_a, obs_id_b, exc)
         raise HTTPException(status_code=504, detail=str(exc)) from exc

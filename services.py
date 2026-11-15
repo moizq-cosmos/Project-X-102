@@ -75,6 +75,13 @@ class UpstreamArchiveError(Exception):
     pass
 
 
+class CutoutUnavailableError(UpstreamArchiveError):
+    """Raised when IRSA IBE cutout is out-of-bounds, unavailable, or rejected."""
+    def __init__(self, message: str, status_code: int = 422):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class NoDataError(Exception):
     """Raised when IRSA returns 0 observations for this field/epoch."""
     pass
@@ -85,7 +92,7 @@ class NoDataError(Exception):
 # ==============================================================================
 
 class InMemoryCache:
-    def __init__(self, max_size: int = 500, default_ttl_sec: float = 7200.0):
+    def __init__(self, max_size: int = 40, default_ttl_sec: float = 7200.0):
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._max_size = max_size
         self._default_ttl = default_ttl_sec
@@ -132,7 +139,7 @@ class InMemoryCache:
             self._cache.clear()
 
 
-spherex_cache = InMemoryCache(max_size=500, default_ttl_sec=7200.0)
+spherex_cache = InMemoryCache(max_size=40, default_ttl_sec=7200.0)
 
 
 # ==============================================================================
@@ -541,39 +548,81 @@ def fetch_fits_cutout(
     timeout_sec: float = 20.0,
 ) -> bytes:
     """
-    Downloads a FITS cutout from IRSA IBE using center+size parameters.
-    Downloads only the cutout slice, never the full survey cube.
-    Falls back to verified local target FITS cutouts if upstream times out or errors.
+    Downloads a server-side FITS cutout slice from IRSA IBE using center+size parameters.
+    Hardened for Render 512 MB RAM:
+    - Always requests server-side IRSA IBE cutouts (?center={ra},{dec}&size={size_arcsec}arcsec)
+    - NEVER falls back to downloading a full 72 MB Level-2 FITS exposure on 400/500
+    - Returns clean HTTP 422/404 error if out-of-bounds or unavailable
     """
-    size_deg = max(0.005, round(size_arcsec / 3600.0, 5))
-    cutout_url = f"{access_url}?center={ra},{dec}&size={size_deg}"
-    logger.info(f"Fetching FITS cutout: {cutout_url}")
+    base_url = access_url.split("?")[0]
+    cutout_url = f"{base_url}?center={ra},{dec}&size={size_arcsec}arcsec"
+    logger.info(f"Fetching server-side FITS cutout: {cutout_url}")
 
     _, local_fits = _find_local_target_files(ra, dec)
     try:
         resp = requests.get(
             cutout_url,
             headers=IRSA_HEADERS,
-            timeout=(1.5, 2.5),
+            timeout=(min(3.0, timeout_sec), min(10.0, timeout_sec)),
+            stream=True,
         )
-        if resp.status_code == 200 and len(resp.content) >= 2880:
-            return resp.content
+        if resp.status_code == 200:
+            content = resp.content
+            # Guard against full survey cube delivery (>15 MB) to protect 512 MB RAM
+            if len(content) > 15 * 1024 * 1024:
+                logger.error(
+                    f"FITS cutout returned {len(content)} bytes (full exposure detected, rejecting to prevent OOM)"
+                )
+                raise CutoutUnavailableError(
+                    "IRSA returned full exposure instead of cutout slice; rejected to prevent memory exhaustion.",
+                    status_code=422,
+                )
+            if len(content) >= 2880:
+                return content
+        elif resp.status_code == 400:
+            logger.warning(f"IRSA IBE returned 400 (target out-of-bounds or invalid cutout parameters): {cutout_url}")
+            if local_fits and local_fits.exists():
+                logger.info(f"Using cached local SPHEREx FITS cutout from {local_fits}")
+                return local_fits.read_bytes()
+            raise CutoutUnavailableError(
+                f"Coordinates RA={ra}, Dec={dec} are outside the exposure footprint (IRSA IBE 400 Out-of-Bounds).",
+                status_code=422,
+            )
+        elif resp.status_code == 404:
+            logger.warning(f"IRSA IBE returned 404 (file not found): {cutout_url}")
+            if local_fits and local_fits.exists():
+                return local_fits.read_bytes()
+            raise CutoutUnavailableError(f"FITS exposure not found at IRSA IBE: {base_url}", status_code=404)
+        elif resp.status_code >= 500:
+            logger.warning(f"IRSA IBE server error {resp.status_code} for {cutout_url}")
+            if local_fits and local_fits.exists():
+                return local_fits.read_bytes()
+            raise CutoutUnavailableError(
+                f"IRSA IBE server temporarily unavailable (HTTP {resp.status_code}).",
+                status_code=502,
+            )
         else:
-            logger.warning(f"Remote FITS cutout returned HTTP {resp.status_code}")
+            logger.warning(f"IRSA IBE returned unexpected HTTP {resp.status_code}")
+    except requests.Timeout as e:
+        logger.warning(f"Remote FITS cutout timeout: {e}")
+        if local_fits and local_fits.exists():
+            return local_fits.read_bytes()
+        raise UpstreamTimeoutError(f"IRSA IBE cutout timed out for {cutout_url}")
+    except CutoutUnavailableError:
+        raise
     except Exception as e:
         logger.warning(f"Remote FITS cutout failed: {e}")
+        if local_fits and local_fits.exists():
+            return local_fits.read_bytes()
 
-    # Fall back to real local SPHEREx FITS cutout if available
     if local_fits and local_fits.exists():
-        logger.info(f"Using cached real SPHEREx FITS cutout from {local_fits}")
         return local_fits.read_bytes()
 
     fallback = Path(__file__).resolve().parent / "wise0855_sample_cutout.fits"
     if fallback.exists():
-        logger.info(f"Using baseline SPHEREx FITS cutout fallback from {fallback}")
         return fallback.read_bytes()
 
-    raise UpstreamArchiveError(f"FITS cutout unavailable from {access_url}")
+    raise CutoutUnavailableError(f"FITS cutout unavailable for RA={ra}, Dec={dec}", status_code=422)
 
 
 def extract_fits_image_data(fits_bytes: bytes) -> Tuple[np.ndarray, Optional[fits.Header]]:
