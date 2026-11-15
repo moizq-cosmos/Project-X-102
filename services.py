@@ -127,6 +127,9 @@ IRSA_HEADERS = {
     "User-Agent": "SPHEREx-Time-Explorer/1.0 (NASA-IPAC Observational Gateway)"
 }
 
+# Circuit-breaker timestamp: trips for 120s when IRSA is unreachable or slow
+_irsa_offline_until: float = 0.0
+
 
 class UpstreamTimeoutError(Exception):
     """Raised when IRSA SIA2 or IBE FITS requests time out."""
@@ -244,19 +247,27 @@ def query_irsa_sia2(
     params = {"COLLECTION": collection, "POS": pos_str}
     logger.info(f"IRSA SIA2 query: collection={collection} POS={pos_str}")
 
+    global _irsa_offline_until
+    local_xml, _ = _find_local_target_files(ra, dec)
+    if local_xml and local_xml.exists() and time.time() < _irsa_offline_until:
+        logger.info(f"Circuit-breaker active: serving local IRSA VOTable immediately: {local_xml.name}")
+        votable = parse_single_table(str(local_xml))
+        return _parse_votable_rows(votable, ra, dec, collection)
+
     resp = None
+    query_to = min(2.5, timeout_sec)
     for attempt in range(1, 4):
         try:
             resp = requests.get(
                 IRSA_SIA2_URL,
                 params=params,
                 headers=IRSA_HEADERS,
-                timeout=timeout_sec,
+                timeout=query_to,
             )
             if resp.status_code == 200:
                 break
             if resp.status_code == 502:
-                local_xml, _ = _find_local_target_files(ra, dec)
+                _irsa_offline_until = time.time() + 120.0
                 if local_xml and local_xml.exists():
                     logger.info(f"IRSA 502 received: using real cached IRSA VOTable from {local_xml}")
                     votable = parse_single_table(str(local_xml))
@@ -266,7 +277,7 @@ def query_irsa_sia2(
                 continue
             raise UpstreamArchiveError(f"IRSA SIA2 returned HTTP {resp.status_code} for {collection}")
         except requests.Timeout as e:
-            local_xml, _ = _find_local_target_files(ra, dec)
+            _irsa_offline_until = time.time() + 120.0
             if local_xml and local_xml.exists():
                 logger.info(f"IRSA timeout: using real cached IRSA VOTable from {local_xml}")
                 votable = parse_single_table(str(local_xml))
@@ -276,7 +287,7 @@ def query_irsa_sia2(
             logger.warning(f"IRSA SIA2 timeout (attempt {attempt}/3), retrying in 5s...")
             time.sleep(5)
         except requests.RequestException as e:
-            local_xml, _ = _find_local_target_files(ra, dec)
+            _irsa_offline_until = time.time() + 120.0
             if local_xml and local_xml.exists():
                 logger.info(f"IRSA network error: using real cached IRSA VOTable from {local_xml}")
                 votable = parse_single_table(str(local_xml))
@@ -621,9 +632,15 @@ def fetch_fits_cutout(
     logger.info(f"Fetching server-side FITS cutout: {cutout_url}")
 
     _, local_fits = _find_local_target_files(ra, dec)
+
+    global _irsa_offline_until
+    if local_fits and local_fits.exists() and time.time() < _irsa_offline_until:
+        logger.info(f"Circuit-breaker active: serving local SPHEREx FITS immediately: {local_fits.name}")
+        return local_fits.read_bytes()
+
     try:
-        connect_to = min(1.5, timeout_sec)
-        read_to = min(3.0, timeout_sec)
+        connect_to = min(0.8, timeout_sec)
+        read_to = min(1.5, timeout_sec)
         resp = requests.get(
             cutout_url,
             headers=IRSA_HEADERS,
@@ -660,6 +677,7 @@ def fetch_fits_cutout(
                 return local_fits.read_bytes()
             raise CutoutUnavailableError(f"FITS exposure not found at IRSA IBE: {base_url}", status_code=404)
         elif resp.status_code >= 500:
+            _irsa_offline_until = time.time() + 120.0
             logger.warning(f"IRSA IBE server error {resp.status_code} for {cutout_url}")
             if local_fits and local_fits.exists():
                 return local_fits.read_bytes()
@@ -672,7 +690,8 @@ def fetch_fits_cutout(
             if local_fits and local_fits.exists():
                 return local_fits.read_bytes()
     except (requests.Timeout, requests.RequestException) as e:
-        logger.warning(f"Remote FITS cutout network failure ({type(e).__name__}): {e}")
+        _irsa_offline_until = time.time() + 120.0
+        logger.warning(f"Remote FITS cutout network failure ({type(e).__name__}): {e}; tripped circuit-breaker for 120s")
         if local_fits and local_fits.exists():
             logger.info(f"Fast failover to cached local SPHEREx FITS cutout: {local_fits}")
             return local_fits.read_bytes()
