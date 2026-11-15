@@ -76,18 +76,25 @@ KNOWN_TARGETS: dict[str, dict] = {
 
 @app.get("/", include_in_schema=False)
 def root_redirect():
-    """Redirect root access directly to /app."""
-    return RedirectResponse(url="/app", status_code=307)
+    """Redirect root access to /app if frontend is present, else to interactive API /docs."""
+    index_path = BASE_DIR / "static" / "index.html"
+    if not index_path.exists():
+        index_path = BASE_DIR / "index.html"
+    if index_path.exists():
+        return RedirectResponse(url="/app", status_code=307)
+    return RedirectResponse(url="/docs", status_code=307)
 
 
 @app.get("/app", include_in_schema=False)
 @app.get("/index.html", include_in_schema=False)
 def serve_frontend():
-    """Serve the single-page application interface."""
+    """Serve the single-page application interface if present, else redirect to /docs."""
     index_path = BASE_DIR / "static" / "index.html"
     if not index_path.exists():
         index_path = BASE_DIR / "index.html"
-    return FileResponse(index_path)
+    if index_path.exists():
+        return FileResponse(index_path)
+    return RedirectResponse(url="/docs", status_code=307)
 
 
 @app.get("/styles.css", include_in_schema=False)
@@ -97,7 +104,9 @@ def serve_styles():
     css_path = BASE_DIR / "static" / "styles.css"
     if not css_path.exists():
         css_path = BASE_DIR / "styles.css"
-    return FileResponse(css_path)
+    if css_path.exists():
+        return FileResponse(css_path)
+    raise HTTPException(status_code=404, detail="Stylesheet not found on this branch")
 
 
 @app.get("/app.js", include_in_schema=False)
@@ -107,7 +116,9 @@ def serve_script():
     js_path = BASE_DIR / "static" / "app.js"
     if not js_path.exists():
         js_path = BASE_DIR / "app.js"
-    return FileResponse(js_path)
+    if js_path.exists():
+        return FileResponse(js_path)
+    raise HTTPException(status_code=404, detail="Frontend script not found on this branch")
 
 
 @app.on_event("startup")
