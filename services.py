@@ -648,6 +648,16 @@ def extract_fits_image_data(fits_bytes: bytes) -> Tuple[np.ndarray, Optional[fit
         if data is None:
             raise UpstreamArchiveError("No 2D image data found in FITS file")
 
+        # Guard against edge-clipped cutouts: reject if finite non-zero fraction < 35%
+        valid_finite_nonzero = np.count_nonzero(np.isfinite(data) & (data != 0))
+        valid_frac = float(valid_finite_nonzero / data.size) if data.size > 0 else 0.0
+        if valid_frac < 0.35:
+            logger.warning(f"Edge-clipped FITS cutout rejected: valid non-zero fraction {valid_frac:.2%} < 35%")
+            raise CutoutUnavailableError(
+                f"Edge-clipped FITS cutout rejected (valid pixel fraction {valid_frac:.2%} < 35%).",
+                status_code=422,
+            )
+
         valid_mask = np.isfinite(data) & (np.abs(data) < 1e12)
         valid_pixels = data[valid_mask]
         fill_val = float(np.nanmedian(valid_pixels)) if len(valid_pixels) > 0 else 0.0
@@ -702,9 +712,15 @@ def fits_to_base64_png(
     except Exception:
         pass
 
+    # If PercentileInterval(99.5) and ZScale yield vmax <= vmin, fall back to (nanmin, nanmax)
     if vmin is None or vmax is None or vmax <= vmin:
-        vmin = float(np.percentile(clean_data, 2.0))
-        vmax = float(np.percentile(clean_data, 98.0))
+        min_val = float(np.nanmin(clean_data))
+        max_val = float(np.nanmax(clean_data))
+        if np.isfinite(min_val) and np.isfinite(max_val) and max_val > min_val:
+            vmin, vmax = min_val, max_val
+        else:
+            vmin = float(np.percentile(clean_data, 2.0))
+            vmax = float(np.percentile(clean_data, 98.0))
     if vmax <= vmin:
         vmax = vmin + 1.0
 
@@ -770,6 +786,10 @@ def fits_to_base64_png(
     return b64, stats
 
 
+# Direct alias for render_cutout_png
+render_cutout_png = fits_to_base64_png
+
+
 def _build_lut(colormap: str) -> Optional[list]:
     """Build an 8-bit palette LUT for scientific colormaps."""
     try:
@@ -824,6 +844,10 @@ def fetch_observation_cutout(
 
     spherex_cache.set(cache_key, {"b64": b64, "stats": stats}, ttl_sec=7200.0)
     return b64, stats
+
+
+# Direct alias for render_cutout_png
+render_cutout_png = fits_to_base64_png
 
 
 # ==============================================================================

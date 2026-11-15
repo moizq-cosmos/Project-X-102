@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SPHEREx Time Explorer // NASA-IPAC</title>
-<link rel="stylesheet" href="/static/styles.css?v=6">
+<link rel="stylesheet" href="/static/styles.css?v=8">
 </head>
 <body>
 
@@ -170,6 +170,7 @@
         </div>
         <div style="display:flex;gap:7px">
           <button class="btn-sm" id="btn-toggle-reticle">Reticle</button>
+          <button class="btn-sm active" id="btn-toggle-tracks" title="Toggle live proper-motion star tracking overlay">Tracks</button>
           <button class="btn-sm" id="btn-toggle-compare" style="display:none">Compare Mode</button>
         </div>
       </div>
@@ -205,6 +206,16 @@
           <div class="o-marker o-west">WEST (−RA) ▶</div>
           <div class="img-box">
             <img id="cutout-img" alt="SPHEREx FITS Cutout" crossorigin="anonymous">
+            <svg class="tracking-overlay" id="tracking-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
+              <!-- Dashed cyan proper-motion vector line + live epoch position marker -->
+              <line id="pm-vector-line" x1="50" y1="50" x2="50" y2="50" stroke="#00d4ff" stroke-width="1.8" stroke-dasharray="3,2" stroke-linecap="round" opacity="0.9" />
+              <!-- Epoch 0 origin marker (amber) -->
+              <circle id="pm-origin-marker" cx="50" cy="50" r="2.2" fill="#fbbf24" stroke="#d97706" stroke-width="1" />
+              <!-- Live epoch target position marker (cyan) -->
+              <circle id="pm-epoch-marker" cx="50" cy="50" r="3.2" fill="#22d3ee" stroke="#0891b2" stroke-width="1.4" />
+              <!-- Text label showing shift -->
+              <text id="pm-marker-label" x="53" y="47" fill="#67e8f9" font-size="3.5" font-family="monospace" font-weight="bold"></text>
+            </svg>
             <div class="reticle" id="reticle">
               <div class="reticle-circle"></div>
               <div class="target-crosshair"></div>
@@ -222,6 +233,40 @@
           <div class="mpill" id="pill-band">band: —</div>
           <div class="mpill" id="pill-coll">collection: —</div>
           <div class="mpill" id="pill-wl">λ: — μm</div>
+        </div>
+
+        <!-- Target Track & Proper Motion Readout Card -->
+        <div class="track-telemetry-card" id="track-telemetry-card">
+          <div class="track-hdr">
+            <span class="track-title">✦ Target Track &amp; Proper Motion</span>
+            <span class="track-pa" id="track-pa">PA: —°</span>
+          </div>
+          <div class="track-grid">
+            <div class="track-item">
+              <span class="track-lbl">Catalog PM:</span>
+              <span class="track-val" id="track-pm">μ_α: — | μ_δ: — mas/yr</span>
+            </div>
+            <div class="track-item">
+              <span class="track-lbl">Total Motion:</span>
+              <span class="track-val" id="track-total">μ_tot: — mas/yr</span>
+            </div>
+            <div class="track-item">
+              <span class="track-lbl">Expected RA:</span>
+              <span class="track-val" id="track-exp-ra">—°</span>
+            </div>
+            <div class="track-item">
+              <span class="track-lbl">Expected Dec:</span>
+              <span class="track-val" id="track-exp-dec">—°</span>
+            </div>
+            <div class="track-item">
+              <span class="track-lbl">Total Shift:</span>
+              <span class="track-val" id="track-shift-arcsec">Δθ: —"</span>
+            </div>
+            <div class="track-item">
+              <span class="track-lbl">Pixel Shift (6.15"/px):</span>
+              <span class="track-val" id="track-shift-px">Δpx: — px</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -339,6 +384,6 @@
 
 </main>
 
-<script src="/static/app.js?v=7"></script>
+<script src="/static/app.js?v=8"></script>
 </body>
 </html>
