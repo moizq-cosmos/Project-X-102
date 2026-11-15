@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Project X-102 // NASA-IPAC Observational Gateway</title>
-<link rel="stylesheet" href="/static/styles.css?v=11">
+<link rel="stylesheet" href="/static/styles.css?v=12">
 </head>
 <body>
 
@@ -102,10 +102,10 @@
           <option value="ALL">All Bands (D1–D6)</option>
           <option value="SPHEREx-D1">SPHEREx-D1 (0.75–1.11 μm)</option>
           <option value="SPHEREx-D2">SPHEREx-D2 (1.11–1.64 μm)</option>
-          <option value="SPHEREx-D3" selected>SPHEREx-D3 (1.64–2.42 μm)</option>
+          <option value="SPHEREx-D3">SPHEREx-D3 (1.64–2.42 μm)</option>
           <option value="SPHEREx-D4">SPHEREx-D4 (2.42–3.82 μm)</option>
           <option value="SPHEREx-D5">SPHEREx-D5 (3.82–4.42 μm)</option>
-          <option value="SPHEREx-D6">SPHEREx-D6 (4.42–5.00 μm)</option>
+          <option value="SPHEREx-D6" selected>SPHEREx-D6 (4.42–5.00 μm)</option>
         </select>
       </div>
       <div class="coord-group">
@@ -145,7 +145,7 @@
   </div>
 
   <!-- ── Empty State ── -->
-  <div id="empty-state">
+  <div id="empty-state" style="display:none">
     <div class="empty-icon">🔭</div>
     <div class="empty-title">No SPHEREx DR1/QR3 observations available for this field/epoch</div>
     <div class="empty-msg">No data available for this field/epoch — IRSA returned 0 observations for the queried position in spherex_dr1 and spherex_qr3. Try a larger radius or a different target.</div>
@@ -384,6 +384,6 @@
 
 </main>
 
-<script src="/static/app.js?v=11"></script>
+<script src="/static/app.js?v=12"></script>
 </body>
 </html>

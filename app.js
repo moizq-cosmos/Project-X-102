@@ -40,7 +40,7 @@ const state = {
   dec: -7.2451,
   radiusDeg: 0.05,
   maxFrames: 50,
-  selectedBand: "SPHEREx-D3",
+  selectedBand: "SPHEREx-D6",
   colormap: "inferno",
   sizeArcsec: 100,
   showTracks: true,
@@ -174,7 +174,9 @@ function updateTrackingTelemetry(obs) {
   }
 
   if (sigEl) {
-    sigEl.textContent = pm?.signature || "Astrometric coordinate tracking active across observation baseline.";
+    const baseDays = state.baselineDays || computeObservationsBaselineDays(state.observations);
+    const baseTxt = baseDays > 0 ? ` • Baseline: ${baseDays} days` : "";
+    sigEl.textContent = (pm?.signature || "Astrometric coordinate tracking active across observation baseline.") + baseTxt;
   }
 
   // Draw overlay vector and markers
@@ -274,6 +276,10 @@ function parseUrlParams() {
     state.selectedBand = band;
     const bandSel = document.getElementById("band-sel");
     if (bandSel) bandSel.value = band;
+  } else if (!target || target.toUpperCase().includes("WISE 0855") || target.toUpperCase().includes("WISE0855")) {
+    state.selectedBand = "SPHEREx-D6";
+    const bandSel = document.getElementById("band-sel");
+    if (bandSel) bandSel.value = "SPHEREx-D6";
   }
   updateCoordInputs();
 }
@@ -413,6 +419,7 @@ async function runQuery() {
   const url = `${API_BASE}/observations?ra=${queryRa}&dec=${queryDec}&radius_deg=${radiusDeg}&max_frames=${maxFrames}`;
 
   setLoadingState(true);
+  showEmpty(false);
 
   try {
     const resp = await apiFetch(url, { signal });
@@ -449,7 +456,9 @@ async function runQuery() {
     if (err.name === "AbortError" || signal.aborted) {
       return;
     }
-    showEmpty(true);
+    if (state.observations.length === 0) {
+      showEmpty(true);
+    }
   } finally {
     if (!signal.aborted) {
       setLoadingState(false);
@@ -463,6 +472,10 @@ const loadObservations = runQuery;
 function setLoadingState(loading) {
   const btn = document.getElementById("btn-resolve");
   if (btn) btn.disabled = loading;
+  if (loading) {
+    const emptyEl = document.getElementById("empty-state");
+    if (emptyEl) emptyEl.style.display = "none";
+  }
 }
 
 function showEmpty(isEmpty) {
@@ -513,6 +526,8 @@ function updateObsStats(data) {
   if (btnZip) btnZip.disabled = obs.length === 0;
   const btnZipTab = document.getElementById("btn-download-zip-tab");
   if (btnZipTab) btnZipTab.disabled = obs.length === 0;
+
+  updateTrackingTelemetry();
 }
 
 // ─── Timeline Scrubber (P0) ───────────────────────────────────────────────────
@@ -818,23 +833,10 @@ function autoSelectDefaultEpochs() {
   // 1. Default Epoch A: first observation (earliest visit)
   state.epochA = { index: 0, obs: visible[0] };
 
-  // 2. Default Epoch B: latest compatible observation in the same spectral band
-  const bandA = visible[0].wavelength_band;
-  let bIdx = -1;
-
-  for (let i = visible.length - 1; i > 0; i--) {
-    if (visible[i].wavelength_band === bandA) {
-      bIdx = i;
-      break;
-    }
-  }
-
-  if (bIdx === -1 && visible.length > 1) {
-    bIdx = visible.length - 1;
-  }
-
-  if (bIdx !== -1 && bIdx !== 0) {
-    state.epochB = { index: bIdx, obs: visible[bIdx] };
+  // 2. Default Epoch B: last observation (latest visit)
+  if (visible.length >= 2) {
+    const lastIdx = visible.length - 1;
+    state.epochB = { index: lastIdx, obs: visible[lastIdx] };
   } else {
     state.epochB = null;
   }
@@ -1177,10 +1179,10 @@ async function computeDiff(signalOrEvent = null, forceRefresh = false) {
       if (placeholder) placeholder.style.display = "none";
       if (cached.maxDelta >= 2.0 || cached.rms >= 0.5) {
         bannerEl.style.display = "";
-        statusEl.textContent = `Candidate for human review — not a confirmed discovery (RMS: ${cached.rms.toFixed(4)} DN, Peak Δ: ${cached.maxDelta.toFixed(4)} DN)`;
+        statusEl.textContent = `Candidate for human review — not a confirmed discovery (RMS: ${cached.rms.toFixed(4)} MJy/sr, Peak Δ: ${cached.maxDelta.toFixed(4)} MJy/sr)`;
       } else {
         bannerEl.style.display = "none";
-        statusEl.textContent = `Baseline aligned (RMS: ${cached.rms.toFixed(4)} DN) — Candidate residuals highlighted`;
+        statusEl.textContent = `Baseline aligned (RMS: ${cached.rms.toFixed(4)} MJy/sr) — Candidate residuals highlighted`;
       }
       setButtonStates();
       return;
@@ -1242,10 +1244,10 @@ async function computeDiff(signalOrEvent = null, forceRefresh = false) {
 
     if (maxDelta >= 2.0 || rms >= 0.5) {
       bannerEl.style.display = "";
-      statusEl.textContent = `Candidate for human review — not a confirmed discovery (RMS: ${rms.toFixed(4)} DN, Peak Δ: ${maxDelta.toFixed(4)} DN)`;
+      statusEl.textContent = `Candidate for human review — not a confirmed discovery (RMS: ${rms.toFixed(4)} MJy/sr, Peak Δ: ${maxDelta.toFixed(4)} MJy/sr)`;
     } else {
       bannerEl.style.display = "none";
-      statusEl.textContent = `Baseline aligned (RMS: ${rms.toFixed(4)} DN) — Candidate residuals highlighted`;
+      statusEl.textContent = `Baseline aligned (RMS: ${rms.toFixed(4)} MJy/sr) — Candidate residuals highlighted`;
     }
 
   } catch (err) {
@@ -1303,6 +1305,12 @@ async function resolveTarget(nameOrCoords) {
   if (!nameOrCoords) return;
 
   state.targetName = nameOrCoords;
+
+  if (nameOrCoords.toUpperCase().includes("WISE 0855") || nameOrCoords.toUpperCase().includes("WISE0855")) {
+    state.selectedBand = "SPHEREx-D6";
+    const bandSel = document.getElementById("band-sel");
+    if (bandSel) bandSel.value = "SPHEREx-D6";
+  }
 
   // Try parsing as "RA,Dec" directly
   const direct = nameOrCoords.match(/^([+-]?\d+\.?\d*)\s*,\s*([+-]?\d+\.?\d*)$/);
@@ -1451,6 +1459,12 @@ function setupEventListeners() {
       state.ra = ra;
       state.dec = dec;
       updateCoordInputs();
+
+      if (name.toUpperCase().includes("WISE 0855") || name.toUpperCase().includes("WISE0855")) {
+        state.selectedBand = "SPHEREx-D6";
+        const bandSel = document.getElementById("band-sel");
+        if (bandSel) bandSel.value = "SPHEREx-D6";
+      }
 
       const targetIn = document.getElementById("target-in");
       if (targetIn) targetIn.value = name;
