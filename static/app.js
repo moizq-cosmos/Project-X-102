@@ -638,7 +638,7 @@ async function loadCutout(obs, signalOrEvent = null) {
   }
 
   const loader = document.getElementById("img-loader");
-  loader.classList.remove("hidden");
+  if (loader) loader.classList.remove("hidden");
   img.style.opacity = "0.3";
 
   const params = new URLSearchParams({
@@ -650,8 +650,14 @@ async function loadCutout(obs, signalOrEvent = null) {
     colormap: state.colormap,
   });
 
+  const timeoutCtrl = new AbortController();
+  const timeoutId = setTimeout(() => timeoutCtrl.abort(), 6000);
+  const effectiveSignal = signal
+    ? (AbortSignal.any ? AbortSignal.any([signal, timeoutCtrl.signal]) : signal)
+    : timeoutCtrl.signal;
+
   try {
-    const resp = await apiFetch(`${API_BASE}/cutout?${params}`, { signal });
+    const resp = await apiFetch(`${API_BASE}/cutout?${params}`, { signal: effectiveSignal });
     const data = await resp.json();
     if (data.data_url) {
       cutoutClientCache.set(cacheKey, data);
@@ -682,7 +688,8 @@ async function loadCutout(obs, signalOrEvent = null) {
     img.removeAttribute("src");
     img.style.opacity = "1";
   } finally {
-    if (!signal || !signal.aborted) {
+    clearTimeout(timeoutId);
+    if (loader) {
       loader.classList.add("hidden");
     }
   }
@@ -1153,6 +1160,10 @@ async function computeDiff(signalOrEvent = null) {
   if (btnDiff) btnDiff.disabled = true;
   statusEl.textContent = "Computing backend calibrated float32 FITS difference…";
   bannerEl.style.display = "none";
+  if (placeholder) {
+    placeholder.style.display = "";
+    placeholder.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text-dim);gap:12px;"><div class="loader-inner" style="width:36px;height:36px;border:3px solid rgba(0,217,255,0.2);border-top-color:var(--accent,#00d9ff);border-radius:50%;animation:spin 0.8s linear infinite;"></div><div>Computing backend calibrated float32 FITS difference…</div></div>';
+  }
 
   const obsA = state.epochA.obs;
   const obsB = state.epochB.obs;
@@ -1170,8 +1181,14 @@ async function computeDiff(signalOrEvent = null) {
   if (obsA.access_url) params.set("access_url_a", obsA.access_url);
   if (obsB.access_url) params.set("access_url_b", obsB.access_url);
 
+  const timeoutCtrl = new AbortController();
+  const timeoutId = setTimeout(() => timeoutCtrl.abort(), 8000);
+  const effectiveSignal = signal
+    ? (AbortSignal.any ? AbortSignal.any([signal, timeoutCtrl.signal]) : signal)
+    : timeoutCtrl.signal;
+
   try {
-    const resp = await apiFetch(`${API_BASE}/diff?${params}`, { signal });
+    const resp = await apiFetch(`${API_BASE}/diff?${params}`, { signal: effectiveSignal });
     const data = await resp.json();
 
     const imgDataUrl = data.data_url || (data.image_base64 ? `data:image/png;base64,${data.image_base64}` : null);
@@ -1208,6 +1225,7 @@ async function computeDiff(signalOrEvent = null) {
       placeholder.textContent = `Diff error: ${err.message}`;
     }
   } finally {
+    clearTimeout(timeoutId);
     setButtonStates();
   }
 }
@@ -1239,10 +1257,6 @@ async function switchTab(tabId) {
       }
     }
     if (state.epochA && state.epochB) {
-      // Ensure cutouts are loaded and cached, then immediately execute subtraction
-      if (!state.imgCacheA || !state.imgCacheB) {
-        await loadComparison();
-      }
       await computeDiff();
     }
   }

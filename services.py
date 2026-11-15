@@ -622,11 +622,13 @@ def fetch_fits_cutout(
 
     _, local_fits = _find_local_target_files(ra, dec)
     try:
+        connect_to = min(1.5, timeout_sec)
+        read_to = min(3.0, timeout_sec)
         resp = requests.get(
             cutout_url,
             headers=IRSA_HEADERS,
-            timeout=(min(3.0, timeout_sec), min(10.0, timeout_sec)),
-            stream=True,
+            timeout=(connect_to, read_to),
+            stream=False,
         )
         if resp.status_code == 200:
             content = resp.content
@@ -635,6 +637,8 @@ def fetch_fits_cutout(
                 logger.error(
                     f"FITS cutout returned {len(content)} bytes (full exposure detected, rejecting to prevent OOM)"
                 )
+                if local_fits and local_fits.exists():
+                    return local_fits.read_bytes()
                 raise CutoutUnavailableError(
                     "IRSA returned full exposure instead of cutout slice; rejected to prevent memory exhaustion.",
                     status_code=422,
@@ -665,9 +669,12 @@ def fetch_fits_cutout(
             )
         else:
             logger.warning(f"IRSA IBE returned unexpected HTTP {resp.status_code}")
-    except requests.Timeout as e:
-        logger.warning(f"Remote FITS cutout timeout: {e}")
+            if local_fits and local_fits.exists():
+                return local_fits.read_bytes()
+    except (requests.Timeout, requests.RequestException) as e:
+        logger.warning(f"Remote FITS cutout network failure ({type(e).__name__}): {e}")
         if local_fits and local_fits.exists():
+            logger.info(f"Fast failover to cached local SPHEREx FITS cutout: {local_fits}")
             return local_fits.read_bytes()
         raise UpstreamTimeoutError(f"IRSA IBE cutout timed out for {cutout_url}")
     except CutoutUnavailableError:
@@ -1000,9 +1007,13 @@ def compute_fits_diff(
     if not access_url_b:
         access_url_b = f"https://irsa.ipac.caltech.edu/ibe/data/spherex/dr1/level2/{obs_id_b}.fits"
 
-    # Fetch FITS cutouts for both epochs
-    bytes_a = fetch_fits_cutout(access_url_a, ra, dec, size_arcsec, timeout_sec)
-    bytes_b = fetch_fits_cutout(access_url_b, ra, dec, size_arcsec, timeout_sec)
+    # Fetch FITS cutouts for both epochs concurrently
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_a = executor.submit(fetch_fits_cutout, access_url_a, ra, dec, size_arcsec, min(timeout_sec, 6.0))
+        fut_b = executor.submit(fetch_fits_cutout, access_url_b, ra, dec, size_arcsec, min(timeout_sec, 6.0))
+        bytes_a = fut_a.result()
+        bytes_b = fut_b.result()
 
     clean_a, header_a = extract_fits_image_data(bytes_a)
     clean_b, header_b = extract_fits_image_data(bytes_b)
