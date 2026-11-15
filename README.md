@@ -1,4 +1,4 @@
-# SPHEREx Time Explorer 🌌🔭
+# Project X-102 🌌🔭
 **NASA Space Apps Challenge 2026 — SPHEREx Time-Domain Astronomy Gateway**
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
@@ -7,7 +7,7 @@
 [![IRSA SIA2](https://img.shields.io/badge/NASA%2FIPAC-IRSA%20SIA2-005ea2.svg)](https://irsa.ipac.caltech.edu)
 [![DOI](https://img.shields.io/badge/DOI-10.26131%2FIRSA678-blue.svg)](https://doi.org/10.26131/IRSA678)
 
-**SPHEREx Time Explorer** is a high-performance web platform and scientific gateway designed to discover moving and variable celestial objects—such as brown dwarfs, high-proper-motion stars, young stellar objects, and candidates for Planet X—using genuine multi-epoch infrared data from the **NASA/IPAC Infrared Science Archive (IRSA)**.
+**Project X-102** is a high-performance web platform and scientific gateway designed to discover moving and variable celestial objects—such as brown dwarfs, high-proper-motion stars, young stellar objects, and candidates for Planet X—using genuine multi-epoch infrared data from the **NASA/IPAC Infrared Science Archive (IRSA)**.
 
 ---
 
